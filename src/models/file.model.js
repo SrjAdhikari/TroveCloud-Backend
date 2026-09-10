@@ -62,7 +62,7 @@ const fileSchema = new Schema(
 );
 
 fileSchema.index({ parentDirId: 1, userId: 1 });
-fileSchema.index({ status: 1, uploadExpiresAt: 1 });
+fileSchema.index({ userId: 1, status: 1, uploadExpiresAt: 1 });
 
 const File = model("File", fileSchema);
 export default File;
