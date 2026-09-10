@@ -130,6 +130,12 @@ const releaseExpiredFiles = async (userId) => {
 				deletedFiles.push(file);
 			}
 		});
+	} catch (error) {
+		// An aborted sweep rolls the rows back, so a stale list would drop objects still named by live rows.
+		deletedFiles = [];
+		console.warn(
+			`Failed to release expired uploads for user ${userId}: ${error.name} ${error.code ?? ""}`.trim(),
+		);
 	} finally {
 		await mongooseSession.endSession();
 	}
@@ -357,7 +363,11 @@ const uploadFileFromServer = async (
 	} catch (error) {
 		// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
 		const released = await releaseReservedBytes(fileId, parentDir._id, 0);
-		if (released) await removeObject(objectKey, fileId);
+
+		// An absent row proves nothing names this key; only a promoted row keeps its object.
+		if (released || !(await File.exists({ _id: fileId }))) {
+			await removeObject(objectKey, fileId);
+		}
 
 		if (byteCounter.state.tripped) {
 			throw new AppError(
@@ -410,7 +420,11 @@ const uploadFileFromServer = async (
 	} catch (error) {
 		// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
 		const released = await releaseReservedBytes(fileId, parentDir._id, 0);
-		if (released) await removeObject(objectKey, fileId);
+
+		// An absent row proves nothing names this key; only a promoted row keeps its object.
+		if (released || !(await File.exists({ _id: fileId }))) {
+			await removeObject(objectKey, fileId);
+		}
 
 		if (error instanceof AppError) throw error;
 		throw new AppError(

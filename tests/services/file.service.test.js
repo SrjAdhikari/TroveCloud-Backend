@@ -631,8 +631,73 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 		expect(await File.countDocuments({})).toBe(0);
 		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
 
-		// The object stays: a vanished row may have been promoted instead, and dropping it would strip a live file.
-		expect(await objectExists(claimed.objectKey)).toBe(true);
+		// No row names the key once the sweep took it, so the bytes cannot be left behind.
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+	});
+
+	it("drops the bytes when the sweep collects the claim mid-transfer", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const source = watchingStream(Buffer.alloc(1024), async () => {
+			claimed = await File.findOne({ userId: user._id })
+				.select("+objectKey")
+				.lean();
+			createdKeys.add(claimed.objectKey);
+
+			await putObject(claimed.objectKey, Readable.from(["partial bytes"]), {
+				contentType: "application/octet-stream",
+			});
+
+			// Stands in for the sweep collecting the claim while bytes already sit at its key.
+			await File.deleteOne({ _id: claimed._id });
+			await Directory.updateOne({ _id: root._id }, { $inc: { fileCount: -1 } });
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "raced.bin", source, 10 ** 9, 512),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
+
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+	});
+
+	it("keeps the object when the row survives the flip as ready", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		vi.spyOn(File, "findOneAndUpdate").mockReturnValueOnce({
+			select: () => ({
+				lean: async () => {
+					// A concurrent confirm promoted the claim between the write and the flip.
+					await File.updateOne(
+						{ userId: user._id },
+						{ $set: { status: "ready" }, $unset: { uploadExpiresAt: "" } },
+					);
+					return null;
+				},
+			}),
+		});
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"promoted.txt",
+				Readable.from(["promoted bytes"]),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED", statusCode: 500 });
+
+		const survivor = await File.findOne({ userId: user._id })
+			.select("+objectKey")
+			.lean();
+		createdKeys.add(survivor.objectKey);
+
+		expect(survivor.status).toBe("ready");
+		// Dropping a promoted row's object would strip the bytes from a live file.
+		expect(await objectExists(survivor.objectKey)).toBe(true);
 	});
 
 	it("leaves a killed import's claim for the expiry sweep to collect", async () => {
@@ -1413,6 +1478,64 @@ describe("initiateUpload releases expired files", () => {
 
 		expect(await File.countDocuments({ _id: { $in: stale } })).toBe(0);
 		expect(await dirStats(root._id)).toEqual({ size: 200, fileCount: 2 });
+	});
+
+	it("mints normally when the sweep itself fails", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.spyOn(File, "find").mockImplementationOnce(() => {
+			throw new Error("mongo down");
+		});
+
+		// Opportunistic cleanup must never reject an otherwise valid upload.
+		const mint = await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		expect(mint.uploadUrl).toContain("X-Amz-Signature");
+		expect((await File.findById(mint.fileId)).status).toBe("pending");
+		expect(await dirStats(root._id)).toEqual({ size: 100, fileCount: 1 });
+		expect(warn.mock.calls.flat().join(" ")).toContain(String(user._id));
+	});
+
+	it("deletes no objects when the sweep is rolled back", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const reservations = [];
+		for (const name of ["first.txt", "second.txt"]) {
+			reservations.push(
+				await initiateUpload(root._id, user._id, name, 300, 10 ** 9),
+			);
+		}
+
+		const stale = [];
+		for (const reservation of reservations) {
+			const objectKey = await trackObjectKey(reservation.fileId);
+			await putObject(objectKey, Readable.from(["partial bytes"]), {
+				contentType: reservation.contentType,
+			});
+			await expire(reservation.fileId);
+			stale.push({ fileId: reservation.fileId, objectKey });
+		}
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const deleteOne = File.deleteOne.bind(File);
+		vi.spyOn(File, "deleteOne")
+			.mockImplementationOnce(deleteOne)
+			.mockImplementationOnce(() => {
+				throw new Error("mongo down");
+			});
+
+		await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		// The aborted delete leaves the row, so dropping its object would strand a live file.
+		for (const { fileId, objectKey } of stale) {
+			expect(await File.findById(fileId)).not.toBeNull();
+			expect(await objectExists(objectKey)).toBe(true);
+		}
+		expect(await dirStats(root._id)).toEqual({ size: 700, fileCount: 3 });
+		expect(warn).toHaveBeenCalled();
 	});
 });
 
