@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 
 import {
 	MIN_UPLOAD_BYTES_PER_SECOND,
+	MAX_EXPIRED_FILES_PER_SWEEP,
 	getFile,
 	createDownloadUrl,
 	deleteFile,
@@ -24,7 +25,11 @@ import {
 } from "../../src/lib/r2.js";
 import File from "../../src/models/file.model.js";
 import Directory from "../../src/models/directory.model.js";
-import { FIFTEEN_MINUTES_MS, ONE_HOUR_MS } from "../../src/utils/date.js";
+import {
+	ONE_MINUTE_MS,
+	FIFTEEN_MINUTES_MS,
+	ONE_HOUR_MS,
+} from "../../src/utils/date.js";
 
 import {
 	createTestUser,
@@ -118,6 +123,12 @@ const dirStats = async (id) => {
 	const d = await Directory.findById(id);
 	return { size: d.size, fileCount: d.fileCount };
 };
+
+const expire = async (fileId) =>
+	File.updateOne(
+		{ _id: fileId },
+		{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+	);
 
 // The limit is always explicit: `uploadFileFromServer` defaults to the declared
 // server-side exemption, and a test must not silently ride on it.
@@ -451,6 +462,339 @@ describe("uploadFileFromServer enforces per-user storage quota", () => {
 	});
 });
 
+describe("uploadFileFromServer claims the row before writing bytes", () => {
+	// Snapshots the DB while the bytes are still in flight.
+	const watchingStream = (body, snapshot) => {
+		let observed = false;
+
+		return new Readable({
+			read() {
+				if (observed) return;
+				observed = true;
+
+				snapshot()
+					.then(() => {
+						this.push(Buffer.from(body));
+						this.push(null);
+					})
+					// Without this a rejected snapshot hangs the test instead of naming the cause.
+					.catch((err) => this.destroy(err));
+			},
+		});
+	};
+
+	it("has a pending 0-byte row naming the key before the bytes are read", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const source = watchingStream("mid flight", async () => {
+			claimed = await File.findOne({ userId: user._id })
+				.select("+objectKey")
+				.lean();
+		});
+
+		const file = await uploadFileFromServer(
+			root._id,
+			user._id,
+			"claim.txt",
+			source,
+			10 ** 9,
+		);
+		createdKeys.add(file.objectKey);
+
+		// Without a row naming the key, a failed transaction strands the object in R2.
+		expect(claimed).toMatchObject({ status: "pending", size: 0 });
+		expect(claimed.objectKey).toBe(file.objectKey);
+		expect(claimed.uploadExpiresAt).toBeInstanceOf(Date);
+	});
+
+	const erroringStream = (snapshot) => {
+		let observed = false;
+
+		return new Readable({
+			read() {
+				if (observed) return;
+				observed = true;
+
+				snapshot()
+					.then(() => this.destroy(new Error("stream boom")))
+					.catch((err) => this.destroy(err));
+			},
+		});
+	};
+
+	const claimOf = (user) => async () =>
+		File.findOne({ userId: user._id }).select("+objectKey").lean();
+
+	it("undoes the claim, the object, and the stats when the bytes never land", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const sub = await createTestDirectory(user._id, { parentDirId: root._id });
+
+		let claimed = null;
+		const snapshot = claimOf(user);
+		const source = erroringStream(async () => {
+			claimed = await snapshot();
+		});
+
+		await expect(
+			uploadFileFromServer(sub._id, user._id, "torn.txt", source, 10 ** 9),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED", statusCode: 500 });
+		createdKeys.add(claimed.objectKey);
+
+		// The claim's +1 file has to come back too, or every ancestor drifts.
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+		expect(await dirStats(sub._id)).toEqual({ size: 0, fileCount: 0 });
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("undoes the claim, the object, and the stats when the quota rejects", async () => {
+		const user = await createTestUser({ storageLimit: 5 });
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const snapshot = claimOf(user);
+		const source = watchingStream("123456", async () => {
+			claimed = await snapshot();
+		});
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"over.txt",
+				source,
+				user.storageLimit,
+			),
+		).rejects.toMatchObject({ code: "STORAGE_LIMIT_EXCEEDED", statusCode: 400 });
+		createdKeys.add(claimed.objectKey);
+
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("ends ready at the counted size, expiry cleared, stats moved exactly once", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const sub = await createTestDirectory(user._id, { parentDirId: root._id });
+
+		const file = await upload(sub._id, user._id, "note.txt", "hello world"); // 11
+
+		expect(file.status).toBe("ready");
+		expect(file.size).toBe(11);
+		expect(file.uploadExpiresAt).toBeUndefined();
+		expect((await getObjectMetadata(file.objectKey)).size).toBe(11);
+
+		expect(await dirStats(sub._id)).toEqual({ size: 11, fileCount: 1 });
+		expect(await dirStats(root._id)).toEqual({ size: 11, fileCount: 1 });
+	});
+
+	it("clears the expiry on a 0-byte import, so it is not a live reservation", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const file = await upload(root._id, user._id, "empty.txt", "");
+		const stored = await File.findById(file._id).lean();
+
+		// A 0-byte flip changes no size, so only the $unset separates it from its claim.
+		expect(stored).toMatchObject({ status: "ready", size: 0 });
+		expect(stored.uploadExpiresAt).toBeUndefined();
+		await expect(deleteFile(file._id, user._id)).resolves.toMatchObject({
+			name: "empty.txt",
+		});
+	});
+
+	it("fails and cleans up when the claim is swept out from under the flip", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const source = watchingStream("racing", async () => {
+			claimed = await File.findOne({ userId: user._id })
+				.select("+objectKey")
+				.lean();
+
+			// Stands in for the sweep collecting this claim mid-upload.
+			await File.deleteOne({ _id: claimed._id });
+			await Directory.updateOne({ _id: root._id }, { $inc: { fileCount: -1 } });
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "raced.txt", source, 10 ** 9),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED", statusCode: 500 });
+		createdKeys.add(claimed.objectKey);
+
+		// Promoting a swept row would resurrect a file already refunded.
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+
+		// No row names the key once the sweep took it, so the bytes cannot be left behind.
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+	});
+
+	it("drops the bytes when the sweep collects the claim mid-transfer", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const source = watchingStream(Buffer.alloc(1024), async () => {
+			claimed = await File.findOne({ userId: user._id })
+				.select("+objectKey")
+				.lean();
+			createdKeys.add(claimed.objectKey);
+
+			await putObject(claimed.objectKey, Readable.from(["partial bytes"]), {
+				contentType: "application/octet-stream",
+			});
+
+			// Stands in for the sweep collecting the claim while bytes already sit at its key.
+			await File.deleteOne({ _id: claimed._id });
+			await Directory.updateOne({ _id: root._id }, { $inc: { fileCount: -1 } });
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "raced.bin", source, 10 ** 9, 512),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
+
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+	});
+
+	it("keeps the object when the row survives the flip as ready", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		vi.spyOn(File, "findOneAndUpdate").mockReturnValueOnce({
+			select: () => ({
+				lean: async () => {
+					// A concurrent confirm promoted the claim between the write and the flip.
+					await File.updateOne(
+						{ userId: user._id },
+						{ $set: { status: "ready" }, $unset: { uploadExpiresAt: "" } },
+					);
+					return null;
+				},
+			}),
+		});
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"promoted.txt",
+				Readable.from(["promoted bytes"]),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED", statusCode: 500 });
+
+		const survivor = await File.findOne({ userId: user._id })
+			.select("+objectKey")
+			.lean();
+		createdKeys.add(survivor.objectKey);
+
+		expect(survivor.status).toBe("ready");
+		// Dropping a promoted row's object would strip the bytes from a live file.
+		expect(await objectExists(survivor.objectKey)).toBe(true);
+	});
+
+	it("leaves a killed import's claim for the expiry sweep to collect", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const abandoned = await createTestFile(user._id, root._id, {
+			status: "pending",
+			size: 0,
+		});
+		const objectKey = await putObjectFor(abandoned);
+		await File.updateOne(
+			{ _id: abandoned._id },
+			{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+		);
+		await Directory.updateOne({ _id: root._id }, { $inc: { fileCount: 1 } });
+
+		await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		expect(await File.findById(abandoned._id)).toBeNull();
+		expect(await objectExists(objectKey)).toBe(false);
+		expect(await dirStats(root._id)).toEqual({ size: 100, fileCount: 1 });
+	});
+
+	it("reports FILE_UPLOAD_FAILED when the claim itself cannot be written", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		vi.spyOn(File, "create").mockRejectedValueOnce(
+			new mongoose.Error.ValidationError(),
+		);
+
+		// Unwrapped, a driver failure escapes as a non-AppError the handler can only render as opaque.
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"claim.txt",
+				Readable.from(["x"]),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED", statusCode: 500 });
+
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("still reports FILE_TOO_LARGE when releasing the claim fails", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.spyOn(File, "deleteOne").mockRejectedValueOnce(new Error("mongo down"));
+
+		// The release runs first in the catch, so a throw there would replace the classification below it.
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"huge.bin",
+				Readable.from([Buffer.alloc(1024)]),
+				10 ** 9,
+				512,
+			),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
+
+		const claim = await File.findOne({ userId: user._id })
+			.select("+objectKey")
+			.lean();
+		const logged = warn.mock.calls.flat().join(" ");
+
+		expect(logged).toContain(String(claim._id));
+		// The key's nonce is what makes another user's object unguessable.
+		expect(logged).not.toContain(claim.objectKey);
+	});
+
+	it("undoes the claim and still reports FILE_TOO_LARGE when the cap trips", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		let claimed = null;
+		const snapshot = claimOf(user);
+		const source = watchingStream(Buffer.alloc(1024), async () => {
+			claimed = await snapshot();
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "huge.bin", source, 10 ** 9, 512),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
+		createdKeys.add(claimed.objectKey);
+
+		expect(await File.countDocuments({})).toBe(0);
+		expect(await objectExists(claimed.objectKey)).toBe(false);
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+});
+
 describe("deleteFile maintains folder sizes", () => {
 	it("decrements the folder and ancestors back to zero on the last file", async () => {
 		const user = await createTestUser();
@@ -484,6 +828,27 @@ describe("deleteFile maintains folder sizes", () => {
 		await deleteFile(file._id, user._id);
 
 		expect(await dirStats(sub._id)).toEqual({ size: 0, fileCount: 0 });
+		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("does not refund a row a concurrent sweep already removed", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const file = await upload(root._id, user._id, "raced.txt", "bytes"); // 5
+
+		vi.spyOn(File, "deleteOne").mockImplementationOnce(async () => {
+			// Raw collection: in-transaction, a WriteConflict retry hides the deletedCount === 0 branch.
+			await File.collection.deleteOne({ _id: file._id });
+			await Directory.updateOne(
+				{ _id: root._id },
+				{ $inc: { size: -5, fileCount: -1 } },
+			);
+			return { acknowledged: true, deletedCount: 0 };
+		});
+
+		await deleteFile(file._id, user._id);
+
+		// Refunding twice drives the ancestors negative.
 		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
 	});
 
@@ -826,6 +1191,393 @@ describe("initiateUpload", () => {
 		expect(reserved.name).toBe("archive.tar.gz");
 		// Unmapped extensions fall back to a type that is never served inline.
 		expect(result.contentType).toBe("application/octet-stream");
+	});
+});
+
+describe("initiateUpload releases expired files", () => {
+	it("deletes an expired reservation and refunds its bytes to the ancestor chain", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const sub = await createTestDirectory(user._id, { parentDirId: root._id });
+
+		const abandoned = await initiateUpload(
+			sub._id,
+			user._id,
+			"abandoned.txt",
+			600,
+			10 ** 9,
+		);
+		await expire(abandoned.fileId);
+
+		await initiateUpload(sub._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		expect(await File.findById(abandoned.fileId)).toBeNull();
+		expect(await dirStats(sub._id)).toEqual({ size: 100, fileCount: 1 });
+		expect(await dirStats(root._id)).toEqual({ size: 100, fileCount: 1 });
+	});
+
+	it("deletes the partial object an expired reservation left in R2", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const abandoned = await initiateUpload(
+			root._id,
+			user._id,
+			"half.txt",
+			600,
+			10 ** 9,
+		);
+		const objectKey = await trackObjectKey(abandoned.fileId);
+		await putObject(objectKey, Readable.from(["partial bytes"]), {
+			contentType: abandoned.contentType,
+		});
+		await expire(abandoned.fileId);
+
+		await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		expect(await objectExists(objectKey)).toBe(false);
+	});
+
+	it("leaves a reservation whose window is still open completely untouched", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const live = await initiateUpload(
+			root._id,
+			user._id,
+			"live.txt",
+			400,
+			10 ** 9,
+		);
+		await initiateUpload(root._id, user._id, "next.txt", 100, 10 ** 9);
+
+		// Its presigned URL can still land bytes; refunding now would lose them.
+		const stillPending = await File.findById(live.fileId)
+			.select("+objectKey")
+			.lean();
+		expect(stillPending.status).toBe("pending");
+		expect(await dirStats(root._id)).toEqual({ size: 500, fileCount: 2 });
+	});
+
+	it("lets a user whose quota is fully consumed by expired reservations upload again", async () => {
+		const user = await createTestUser({ storageLimit: 1000 });
+		const root = await createTestDirectory(user._id);
+
+		const abandoned = await initiateUpload(
+			root._id,
+			user._id,
+			"brick.txt",
+			1000,
+			user.storageLimit,
+		);
+		await expire(abandoned.fileId);
+
+		// Nothing else refunds an unconfirmed reservation, so without the sweep the account stays wedged.
+		const fresh = await initiateUpload(
+			root._id,
+			user._id,
+			"after.txt",
+			1000,
+			user.storageLimit,
+		);
+
+		expect(await File.findById(abandoned.fileId)).toBeNull();
+		expect(await File.findById(fresh.fileId)).not.toBeNull();
+		expect(await dirStats(root._id)).toEqual({ size: 1000, fileCount: 1 });
+	});
+
+	it("does not release another user's expired files", async () => {
+		const owner = await createTestUser();
+		const other = await createTestUser();
+		const ownerRoot = await createTestDirectory(owner._id);
+		const otherRoot = await createTestDirectory(other._id);
+
+		const ownerStale = await initiateUpload(
+			ownerRoot._id,
+			owner._id,
+			"mine.txt",
+			300,
+			10 ** 9,
+		);
+		const otherStale = await initiateUpload(
+			otherRoot._id,
+			other._id,
+			"theirs.txt",
+			700,
+			10 ** 9,
+		);
+		await expire(ownerStale.fileId);
+		await expire(otherStale.fileId);
+
+		await initiateUpload(ownerRoot._id, owner._id, "fresh.txt", 50, 10 ** 9);
+
+		expect(await File.findById(ownerStale.fileId)).toBeNull();
+		expect(
+			(await File.findById(otherStale.fileId).select("+objectKey").lean())
+				.status,
+		).toBe("pending");
+		expect(await dirStats(otherRoot._id)).toEqual({ size: 700, fileCount: 1 });
+	});
+
+	it("is a clean no-op when nothing has expired", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const ready = await upload(root._id, user._id, "kept.txt", "hello"); // 5
+
+		const mint = await initiateUpload(root._id, user._id, "new.txt", 100, 10 ** 9);
+
+		expect(mint.uploadUrl).toContain("X-Amz-Signature");
+		expect(await File.countDocuments({ userId: user._id })).toBe(2);
+		expect(await objectExists(ready.objectKey)).toBe(true);
+		expect(await dirStats(root._id)).toEqual({ size: 105, fileCount: 2 });
+	});
+
+	it("never releases a ready file carrying a stale expiry (status guard)", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const ready = await upload(root._id, user._id, "confirmed.txt", "hello"); // 5
+
+		await File.updateOne(
+			{ _id: ready._id },
+			{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+		);
+
+		await initiateUpload(root._id, user._id, "next.txt", 100, 10 ** 9);
+
+		expect(await File.findById(ready._id)).not.toBeNull();
+		expect(await objectExists(ready.objectKey)).toBe(true);
+		expect(await dirStats(root._id)).toEqual({ size: 105, fileCount: 2 });
+	});
+
+	it("releases every expired file across branches in one mint (worst case)", async () => {
+		const user = await createTestUser({ storageLimit: 1000 });
+		const root = await createTestDirectory(user._id);
+		const left = await createTestDirectory(user._id, { parentDirId: root._id });
+		const right = await createTestDirectory(user._id, { parentDirId: root._id });
+
+		for (const dir of [left, right, root]) {
+			const stale = await initiateUpload(
+				dir._id,
+				user._id,
+				"stale.txt",
+				300,
+				user.storageLimit,
+			);
+			await expire(stale.fileId);
+		}
+
+		// 900 against a 1000 limit only fits if all three refunds land.
+		await initiateUpload(left._id, user._id, "fresh.txt", 900, user.storageLimit);
+
+		expect(await File.countDocuments({ userId: user._id })).toBe(1);
+		expect(await dirStats(left._id)).toEqual({ size: 900, fileCount: 1 });
+		expect(await dirStats(right._id)).toEqual({ size: 0, fileCount: 0 });
+		expect(await dirStats(root._id)).toEqual({ size: 900, fileCount: 1 });
+	});
+
+	it("does not delete the object of a reservation confirmed during the sweep", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const body = "raced bytes";
+
+		const raced = await initiateUpload(
+			root._id,
+			user._id,
+			"raced.txt",
+			body.length,
+			10 ** 9,
+		);
+		const objectKey = await trackObjectKey(raced.fileId);
+		await putObject(objectKey, Readable.from([body]), {
+			contentType: raced.contentType,
+		});
+		await expire(raced.fileId);
+
+		vi.spyOn(File, "deleteOne").mockImplementationOnce(async () => {
+			// Only the delete's result is stubbed: in-transaction, a WriteConflict retry hides the deletedCount === 0 branch.
+			await confirmUpload(raced.fileId, user._id);
+			return { acknowledged: true, deletedCount: 0 };
+		});
+
+		await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		const survivor = await File.findById(raced.fileId)
+			.select("+objectKey")
+			.lean();
+		expect(survivor.status).toBe("ready");
+		expect(await objectExists(objectKey)).toBe(true);
+		// Skipping the delete must skip the refund too: the bytes back a real file.
+		expect(await dirStats(root._id)).toEqual({
+			size: body.length + 100,
+			fileCount: 2,
+		});
+	});
+
+	it("keeps the release when the mint is rejected for quota", async () => {
+		const user = await createTestUser({ storageLimit: 1000 });
+		const root = await createTestDirectory(user._id);
+		await upload(root._id, user._id, "kept.txt", "x".repeat(800), user.storageLimit);
+
+		const abandoned = await initiateUpload(
+			root._id,
+			user._id,
+			"stale.txt",
+			200,
+			user.storageLimit,
+		);
+		const staleKey = await trackObjectKey(abandoned.fileId);
+		await putObject(staleKey, Readable.from(["partial bytes"]), {
+			contentType: abandoned.contentType,
+		});
+		await expire(abandoned.fileId);
+
+		// Rolling the sweep back with the aborted mint would wedge a user who is genuinely full.
+		await expect(
+			initiateUpload(root._id, user._id, "fresh.txt", 900, user.storageLimit),
+		).rejects.toMatchObject({ code: "STORAGE_LIMIT_EXCEEDED", statusCode: 400 });
+
+		expect(await File.findById(abandoned.fileId)).toBeNull();
+		expect(await objectExists(staleKey)).toBe(false);
+		expect(await dirStats(root._id)).toEqual({ size: 800, fileCount: 1 });
+	});
+
+	it("releases at most MAX_EXPIRED_FILES_PER_SWEEP rows per mint, draining the rest on the next", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const overflow = 5;
+		const total = MAX_EXPIRED_FILES_PER_SWEEP + overflow;
+
+		const stale = [];
+		for (let i = 0; i < total; i++) {
+			const file = await createTestFile(user._id, root._id, {
+				name: `stale-${i}.txt`,
+				status: "pending",
+				size: 10,
+			});
+			stale.push(file._id);
+		}
+		await File.updateMany(
+			{ _id: { $in: stale } },
+			{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+		);
+		await Directory.updateOne(
+			{ _id: root._id },
+			{ $inc: { size: total * 10, fileCount: total } },
+		);
+
+		// Unbounded, a large backlog blows past MongoDB's 60s transaction ceiling.
+		await initiateUpload(root._id, user._id, "first.txt", 100, 10 ** 9);
+
+		expect(await File.countDocuments({ _id: { $in: stale } })).toBe(overflow);
+		expect(await dirStats(root._id)).toEqual({
+			size: overflow * 10 + 100,
+			fileCount: overflow + 1,
+		});
+
+		await initiateUpload(root._id, user._id, "second.txt", 100, 10 ** 9);
+
+		expect(await File.countDocuments({ _id: { $in: stale } })).toBe(0);
+		expect(await dirStats(root._id)).toEqual({ size: 200, fileCount: 2 });
+	});
+
+	it("mints normally when the sweep itself fails", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.spyOn(File, "find").mockImplementationOnce(() => {
+			throw new Error("mongo down");
+		});
+
+		// Opportunistic cleanup must never reject an otherwise valid upload.
+		const mint = await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		expect(mint.uploadUrl).toContain("X-Amz-Signature");
+		expect((await File.findById(mint.fileId)).status).toBe("pending");
+		expect(await dirStats(root._id)).toEqual({ size: 100, fileCount: 1 });
+		expect(warn.mock.calls.flat().join(" ")).toContain(String(user._id));
+	});
+
+	it("deletes no objects when the sweep is rolled back", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const reservations = [];
+		for (const name of ["first.txt", "second.txt"]) {
+			reservations.push(
+				await initiateUpload(root._id, user._id, name, 300, 10 ** 9),
+			);
+		}
+
+		const stale = [];
+		for (const reservation of reservations) {
+			const objectKey = await trackObjectKey(reservation.fileId);
+			await putObject(objectKey, Readable.from(["partial bytes"]), {
+				contentType: reservation.contentType,
+			});
+			await expire(reservation.fileId);
+			stale.push({ fileId: reservation.fileId, objectKey });
+		}
+
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const deleteOne = File.deleteOne.bind(File);
+		vi.spyOn(File, "deleteOne")
+			.mockImplementationOnce(deleteOne)
+			.mockImplementationOnce(() => {
+				throw new Error("mongo down");
+			});
+
+		await initiateUpload(root._id, user._id, "fresh.txt", 100, 10 ** 9);
+
+		// The aborted delete leaves the row, so dropping its object would strand a live file.
+		for (const { fileId, objectKey } of stale) {
+			expect(await File.findById(fileId)).not.toBeNull();
+			expect(await objectExists(objectKey)).toBe(true);
+		}
+		expect(await dirStats(root._id)).toEqual({ size: 700, fileCount: 3 });
+		expect(warn).toHaveBeenCalled();
+	});
+});
+
+describe("uploadFileFromServer releases expired files", () => {
+	it("deletes an expired reservation, its object, and its stats before claiming", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const abandoned = await initiateUpload(
+			root._id,
+			user._id,
+			"stale.txt",
+			600,
+			10 ** 9,
+		);
+		const staleKey = await trackObjectKey(abandoned.fileId);
+		await putObject(staleKey, Readable.from(["partial bytes"]), {
+			contentType: abandoned.contentType,
+		});
+		await expire(abandoned.fileId);
+
+		const file = await upload(root._id, user._id, "imported.txt", "hello"); // 5
+
+		// An import-only account never mints, so its abandoned claims would pile up forever.
+		expect(await File.findById(abandoned.fileId)).toBeNull();
+		expect(await objectExists(staleKey)).toBe(false);
+		expect(file.status).toBe("ready");
+		expect(await dirStats(root._id)).toEqual({ size: 5, fileCount: 1 });
+	});
+
+	it("leaves a reservation whose window is still open untouched", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+
+		const live = await initiateUpload(root._id, user._id, "live.txt", 400, 10 ** 9);
+
+		await upload(root._id, user._id, "imported.txt", "hello"); // 5
+
+		expect(
+			(await File.findById(live.fileId).select("+objectKey").lean()).status,
+		).toBe("pending");
+		expect(await dirStats(root._id)).toEqual({ size: 405, fileCount: 2 });
 	});
 });
 
