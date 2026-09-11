@@ -434,6 +434,7 @@ const hardDeleteUser = async (caller, targetId) => {
 
 	let deletionSummary;
 	let filesToWipe = [];
+	let profilePictureKeyToWipe = null;
 
 	try {
 		await mongooseSession.withTransaction(async () => {
@@ -449,6 +450,10 @@ const hardDeleteUser = async (caller, targetId) => {
 			]).session(mongooseSession);
 
 			const files = await File.find({ userId: userObjectId }, "_id objectKey", {
+				session: mongooseSession,
+			}).lean();
+
+			const owner = await User.findById(userObjectId, "profilePictureKey", {
 				session: mongooseSession,
 			}).lean();
 
@@ -476,19 +481,33 @@ const hardDeleteUser = async (caller, targetId) => {
 			};
 
 			filesToWipe = files;
+			profilePictureKeyToWipe = owner?.profilePictureKey ?? null;
 		});
 	} finally {
 		await mongooseSession.endSession();
 	}
 
-	// Delete the physical files from R2
+	const objectsToWipe = filesToWipe.map((file) => ({
+		key: file.objectKey,
+		label: `file ${file._id}`,
+	}));
+
+	// If the user had a profile picture, add it to the list of objects to wipe.
+	if (profilePictureKeyToWipe) {
+		objectsToWipe.push({
+			key: profilePictureKeyToWipe,
+			label: `profile picture for user ${userObjectId}`,
+		});
+	}
+
+	// Delete the stored objects from R2
 	await Promise.allSettled(
-		filesToWipe.map(async (file) => {
+		objectsToWipe.map(async ({ key, label }) => {
 			try {
-				await deleteObject(file.objectKey);
+				await deleteObject(key);
 			} catch (error) {
 				console.warn(
-					`Hard-delete: failed to remove the object for file ${file._id}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+					`Hard-delete: failed to remove the object for ${label}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
 				);
 			}
 		}),

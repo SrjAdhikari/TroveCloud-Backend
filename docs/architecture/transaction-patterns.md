@@ -147,9 +147,9 @@ Mirror image of suspend: set `deletedAt = now` and `Session.deleteMany` for the 
 
 ### 7. `hardDeleteUser` in `src/services/admin/user.service.js`
 
-The widest transaction in the codebase — a four-collection wipe (`Session.deleteMany` → `File.deleteMany` → `Directory.deleteMany` → `User.deleteOne`) all keyed by `userId`. Inside the same transaction, a pre-read `File.find({ userId }, "_id objectKey", { session })` snapshots the object keys to remove; that list is captured into a closure variable.
+The widest transaction in the codebase — a four-collection wipe (`Session.deleteMany` → `File.deleteMany` → `Directory.deleteMany` → `User.deleteOne`) all keyed by `userId`. Inside the same transaction, a pre-read `File.find({ userId }, "_id objectKey", { session })` snapshots the object keys to remove, and a second read picks up the user's `profilePictureKey`; both are captured into closure variables. Reading the avatar key inside the transaction rather than from the document fetched earlier is what makes a concurrent replace safe — that write conflicts with the `User.deleteOne` here, and the retry sees the new key.
 
-**Object cleanup happens outside the transaction** via `Promise.allSettled(filesToWipe.map((file) => deleteObject(file.objectKey)))`. Same reasoning as Session.create being outside: dropping an object is a side effect against R2, and `withTransaction`'s automatic retries would re-issue the deletes on a `WriteConflict`. `allSettled` ensures one failed delete doesn't stop the others from running; rejected promises are warn-logged but never re-thrown — the DB is the source of truth and orphaned bytes are reconcilable later.
+**Object cleanup happens outside the transaction** via `Promise.allSettled` over one list holding both the file objects and the avatar object, each entry carrying a label so a failure names the right thing. Same reasoning as Session.create being outside: dropping an object is a side effect against R2, and `withTransaction`'s automatic retries would re-issue the deletes on a `WriteConflict`. `allSettled` ensures one failed delete doesn't stop the others from running; rejected promises are warn-logged but never re-thrown — the DB is the source of truth and orphaned bytes are reconcilable later.
 
 ### 8. Folder-stats maintenance in `src/services/file.service.js` and `src/services/directory.service.js`
 

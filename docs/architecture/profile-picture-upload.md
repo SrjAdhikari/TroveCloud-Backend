@@ -152,4 +152,4 @@ Vitest + `mongodb-memory-server` at the service + util layer, matching existing 
 
 - `DELETE /api/users/profile-picture` (clear the picture back to `null`).
 - Image resizing / thumbnails — only if needed later.
-- Reconciling stored keys against the bucket, so an object orphaned by a failed cleanup is eventually removed. `hardDeleteUser` removes a user's file objects but not their avatar object, so it produces one of these.
+- Reconciling stored keys against the bucket, so an object orphaned by a failed cleanup is eventually removed. `hardDeleteUser` drops the avatar alongside the user's file objects, but that delete is best-effort — a failure is warn-logged, not retried.
