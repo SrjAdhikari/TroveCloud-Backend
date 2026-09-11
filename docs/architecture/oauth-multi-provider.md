@@ -8,7 +8,7 @@ Describes the cross-cutting design that powers Google and GitHub sign-in. For pe
 
 ## 🏗️ Architecture Overview
 
-Each OAuth provider has a **thin provider-specific function** in `auth.service.js` that handles the provider's idiosyncratic verification step (verifying a Google ID token, or exchanging a GitHub code for an access token + fetching profile). After producing a normalized profile (`{ name, email, picture }`), the function delegates to a single **provider-agnostic helper** that runs the find-or-create user logic, applies security guards, refreshes the profile, enforces device caps, and issues a session.
+Each OAuth provider has a **thin provider-specific function** in `auth.service.js` that handles the provider's idiosyncratic verification step (verifying a Google ID token, or exchanging a GitHub code for an access token + fetching profile). After producing a normalized profile (`{ name, email, picture }`), the function delegates to a single **provider-agnostic helper** that runs the find-or-create user logic, applies security guards, enforces device caps, and issues a session.
 
 The split keeps provider-specific code small and predictable, while concentrating the security-critical logic (account-takeover guards, transaction scope, device-cap enforcement) in one place.
 
@@ -110,7 +110,7 @@ Response is `201 Created` when the call provisioned a new account, `200 OK` when
 1. **User lookup.** `User.findOne({ email }).lean()`.
 2. **Existing-user path:**
    - Run the account-takeover provider-mismatch guard.
-   - Diff-then-update the denormalized profile fields (`name`, `profilePicture`) only when the provider's payload differs from stored values. Single `User.updateOne` with `runValidators: true`.
+   - **No profile re-sync.** `name` and `profilePicture` are seeded once on the new-user path and never rewritten on a subsequent login — both are user-editable in-app, so the app owns them after signup and a re-sync would clobber the user's own changes. The diff-then-update block is kept commented out in `oauth.service.js` in case provider re-sync is ever wanted back. See [`profile-picture-upload.md`](./profile-picture-upload.md).
    - Enforce `MAX_ALLOWED_DEVICES` via `enforceDeviceLimit(userId)` (shared with the password login path; see `src/services/session.service.js`).
    - Create a `Session` and return `{ session, isNewUser: false }`.
 3. **New-user path:**

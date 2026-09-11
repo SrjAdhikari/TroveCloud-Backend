@@ -1,6 +1,6 @@
 # Storage Usage & Quota
 
-> **Status:** As-built (2026-06-14). Per-user storage quota + the usage-breakdown endpoint.
+> **Status:** As-built (2026-09-10). Per-user storage quota + the usage-breakdown endpoint.
 
 This document covers the per-user storage quota: where the limit lives, how usage is read, how the quota is enforced on upload, and the `GET /api/storage/usage` endpoint that powers the frontend's sidebar storage bar and settings storage tab.
 
@@ -52,9 +52,10 @@ This document covers the per-user storage quota: where the limit lives, how usag
 
 ## 🛡️ Quota Enforcement on Upload
 
-The quota is enforced by the shared `checkQuota` helper in `src/services/file.service.js`, called by both upload paths — `initiateUpload` (browser uploads, at the moment the bytes are reserved) and `uploadFileFromServer` (Drive import and the storage cutover). See `../file/file-upload.md` for the full upload flow. The non-obvious parts:
+The quota is enforced by the shared `checkQuota` helper in `src/services/file.service.js`, called by both upload paths — `initiateUpload` (browser uploads, at the moment the bytes are reserved) and `uploadFileFromServer` (Drive import). See `../file/file-upload.md` for the full upload flow. The non-obvious parts:
 
-- **Checked inside the upload transaction.** After the bytes are streamed to disk and the final count is known, the transaction reads the current root `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) if `usedBytes + uploadedBytes > storageLimit`, before creating the `File` row.
+- **Checked inside the transaction that writes the counters.** On the browser path that is the transaction creating the `pending` row: the check runs against the *declared* size, before any bytes exist. On the server-side path the row is claimed at `size: 0` before streaming and the check runs in the second transaction, against the byte counter's total, before the row is promoted to `ready` — the real size isn't knowable any earlier. Either way the transaction reads the current root `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) when `usedBytes + uploadedBytes > storageLimit`.
+- **Abandoned reservations are refunded first.** `releaseExpiredFiles` runs at the head of both upload paths, in its own transaction that commits before the check opens, so bytes held by lapsed uploads are already back in the budget by the time the quota is evaluated. See `../file/file-upload.md`.
 - **Concurrency-safe without a lock.** The same transaction also `$inc`s the root document (via `updateAncestorDirectoryStats`). Two simultaneous uploads therefore write-conflict on the root doc; `withTransaction` retries the loser, which re-reads the now-updated `size` and re-checks — so the cap holds even under concurrent uploads. (Details in `./transaction-patterns.md`.)
 - **Boundary:** the check uses a strict `>`, so an upload that exactly fills the quota is allowed, and a 0-byte upload at an exactly-full quota is allowed.
 
@@ -67,7 +68,8 @@ The quota is enforced by the shared `checkQuota` helper in `src/services/file.se
 | User with no files | `used: 0`, `breakdown: []`, `total` = their quota |
 | File whose extension isn't recognised, or has no extension | Counted under the `Other` category |
 | 0-byte file | Surfaces its category in the breakdown with `size: 0` |
-| Upload would exceed the quota | Rejected with `STORAGE_LIMIT_EXCEEDED` (400); no DB row, partial disk file removed |
+| Upload would exceed the quota | Rejected with `STORAGE_LIMIT_EXCEEDED` (400). The browser path never creates a row; the server-side path deletes its claim row and the object it already wrote |
+| Upload authorised but never completed | Its declared bytes stay reserved until `uploadExpiresAt`, then are refunded by the reclaim sweep at the head of the owner's next upload |
 | Two concurrent uploads near the limit | One commits; the other write-conflicts on the root doc, retries against the fresh size, and is accepted or rejected correctly |
 | `used` vs `sum(breakdown)` | Both derive from the same files; in rare denormalization drift `used` (root size) is treated as authoritative |
 

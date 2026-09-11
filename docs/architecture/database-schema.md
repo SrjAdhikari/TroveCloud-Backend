@@ -1,6 +1,6 @@
 # Database Schema
 
-> **Status:** As-built (2026-06-14). Mirrors `src/models/*` and `src/schemas/*`. Refresh when a model is added, a field is renamed, or an index changes.
+> **Status:** As-built (2026-09-10). Mirrors `src/models/*` and `src/schemas/*`. Refresh when a model is added, a field is renamed, or an index changes.
 
 The TroveCloud backend runs on MongoDB via Mongoose. This doc is a single place to look up every collection, its fields, its indexes, and how the collections link to each other. The code in `src/models/` is the source of truth — if this document ever drifts from the models, the models win.
 
@@ -42,7 +42,8 @@ Source: `src/models/user.model.js`. Atlas mirror: `src/schemas/user.schema.js`.
 | `password`              | String   | only if `provider=email`  | —         | `minlength: 8`, `select: false`, bcrypt-hashed pre-save       |
 | `rootDirId`             | ObjectId | no                        | —         | Set during `verifyOTP` (email path) or OAuth new-user branch  |
 | `storageLimit`          | Number   | yes                       | env       | Per-user storage quota in bytes, defaulting to the environment-configured `DEFAULT_STORAGE_LIMIT`. **Not** in the Atlas validator's `required` array — the Mongoose default guarantees presence on every ORM write, so requiring it is redundant. Enforced on upload; see `../file/file-upload.md` |
-| `profilePicture`        | String   | no                        | `null`    | Populated from OAuth profile; nullable in both Mongoose+Atlas |
+| `profilePicture`        | String   | no                        | `null`    | Populated from OAuth profile; nullable in both Mongoose+Atlas. Read only as the fallback when `profilePictureKey` is unset |
+| `profilePictureKey`     | String   | no                        | `null`    | The R2 object key for an uploaded avatar, shaped `profile-pictures/<userId>/<32 hex token>` and pattern-enforced. Never returned to clients — `formatUser` presigns it into a short-lived `profilePictureUrl` instead |
 | `provider`              | String   | yes                       | `"email"` | Enum `["email", "google", "github"]`. Immutable via pre-save  |
 | `otp`                   | String   | no                        | —         | `select: false`, hashed                                       |
 | `otpExpiresAt`          | Date     | no                        | —         | `select: false`                                               |
@@ -59,6 +60,7 @@ Source: `src/models/user.model.js`. Atlas mirror: `src/schemas/user.schema.js`.
 - `email` — unique (from `unique: true` on schema).
 - `verificationExpiresAt` — TTL (`expireAfterSeconds: 0`). Deletes unverified users automatically when their 1-hour verification window expires.
 - `role`, `suspendedAt`, `deletedAt` — individual non-unique indexes. Sized for admin user-list filtering and the `authenticate` / `loginUser` reject paths. A compound or partial index on `{ deletedAt: null }` is the candidate when admin endpoints get real traffic — deferred until then.
+- `profilePictureKey` — non-unique, partial on `{ profilePictureKey: { $type: "string" } }`, so it indexes only users who have actually uploaded an avatar rather than the `null` default every other user carries. No service-layer read path filters on it today; it exists to make "which users have a stored avatar object" answerable without a collection scan when keys are reconciled against the bucket.
 
 **Hooks**
 
@@ -139,7 +141,7 @@ Source: `src/models/file.model.js`. Atlas mirror: `src/schemas/files.schema.js`.
 
 - Compound `{ parentDirId: 1, userId: 1 }` — mirrors the Directory index; lets "list files in dir X owned by user Y" hit a single index.
 - Unique `{ objectKey: 1 }` — one document per stored object, enforced by the database rather than by convention.
-- Compound `{ status: 1, uploadExpiresAt: 1 }` — finds pending uploads whose reservation has lapsed without scanning the collection.
+- Compound `{ userId: 1, status: 1, uploadExpiresAt: 1 }` — finds lapsed `pending` uploads without scanning the collection. `userId` leads because the only query that uses it is the reclaim sweep at the head of every upload, which asks for one user's expired reservations: leading with the owner bounds the scan to that user rather than to every lapsed reservation in the system.
 
 **Name vs extension**
 
@@ -200,7 +202,7 @@ The refs in one place:
 
 **Cascading deletes** are handled in two places:
 
-- `directory.service.js`'s recursive delete walks the tree via `$graphLookup`, deletes directory + file rows inside a transaction, and cleans up physical files with `Promise.allSettled` outside.
+- `directory.service.js`'s recursive delete walks the tree via `$graphLookup`, deletes directory + file rows inside a transaction, and drops their R2 objects with `Promise.allSettled` outside.
 - `admin/user.service.js`'s `hardDeleteUser` wipes `Session`, `File`, `Directory`, and `User` rows in one transaction, with the same outside-the-transaction `Promise.allSettled` shape for physical-file cleanup. See `transaction-patterns.md` for the "not-retry-safe work stays out" rule.
 
 ---

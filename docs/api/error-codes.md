@@ -1,6 +1,6 @@
 # Error Codes
 
-> **Status:** As-of 2026-09-08. This document is a glossary that drifts as the codebase evolves — refresh it when adding or removing codes from `src/constants/appErrorCode.js`.
+> **Status:** As-of 2026-09-10. This document is a glossary that drifts as the codebase evolves — refresh it when adding or removing codes from `src/constants/appErrorCode.js`.
 
 The TroveCloud backend returns structured errors with stable, machine-readable codes. The frontend consumes these codes to drive UI behavior (which form to redirect to, which message to show, when to retry). This document is the contract: the source of truth for what each code means and where it's thrown.
 
@@ -77,13 +77,11 @@ Returned by the admin subsystem (`/api/admin/*`). The route gate (`requireRole` 
 
 | Code                 | Typical HTTP | Meaning                                                                                                 | Where thrown                          |
 | -------------------- | ------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `FILE_DELETE_FAILED` | 500          | Disk or DB delete failed after the request was authorized.                                              | `deleteFile` in `file.service.js`     |
 | `FILE_NOT_FOUND`     | 404          | The requested file doesn't exist, doesn't belong to the user, or is an upload that has not been confirmed yet. All read paths filter `status: "ready"`, so a pending upload is indistinguishable from a missing file. | `getFile`, `createDownloadUrl`, `updateFile`, `deleteFile`, `confirmUpload` |
-| `FILE_RENAME_FAILED` | 500          | Mongoose update failed after the user passed authorization checks.                                      | `updateFile` in `file.service.js`     |
 | `FILE_TOO_LARGE`     | 400          | The declared or streamed size exceeds the environment-configured per-file cap. On the browser path this is checked against the declared size before anything is reserved; on the server-side path the byte counter trips mid-stream. | `initiateUpload`, `uploadFileFromServer` in `file.service.js` |
-| `FILE_UPLOAD_FAILED` | 500          | Presigning the upload URL failed (the reservation is released first), or the server-side stream to R2 failed. | `initiateUpload`, `uploadFileFromServer` in `file.service.js` |
-| `STORAGE_LIMIT_EXCEEDED` | 400      | The upload would push the user's total stored bytes past their `storageLimit` quota. Checked by `checkQuota` inside the reserving transaction against the denormalized root-directory size. Also thrown when the limit itself is unusable (absent, null, or non-numeric) — the quota fails closed rather than silently disabling itself. | `initiateUpload`, `uploadFileFromServer` in `file.service.js` |
-| `UPLOAD_INCOMPLETE`  | 400          | Confirm was called but no object exists at the file's key — the `PUT` never landed. The reservation is deliberately left in place. | `confirmUpload` in `file.service.js` |
+| `FILE_UPLOAD_FAILED` | 500          | Presigning the upload URL failed (the reservation is released first), or the server-side path failed to claim its row, stream to R2 (for any reason other than the size cap, which raises `FILE_TOO_LARGE`), or promote the row to `ready`. A failed claim leaves nothing behind — the transaction rolled back before any object existed. The stream and promote failures release the reservation and drop the object unless a row still names it. | `initiateUpload`, `uploadFileFromServer` in `file.service.js` |
+| `STORAGE_LIMIT_EXCEEDED` | 400      | The upload would push the user's total stored bytes past their `storageLimit` quota. Checked by `checkQuota` against the denormalized root-directory size, inside the transaction that reserves the bytes on the browser path and inside the promoting transaction on the server-side path (where the real size isn't known until the stream ends). Also thrown when the limit itself is unusable (absent, null, or non-numeric) — the quota fails closed rather than silently disabling itself. | `initiateUpload`, `uploadFileFromServer` in `file.service.js` |
+| `UPLOAD_INCOMPLETE`  | 400          | Confirm was called but no object exists at the file's key — the `PUT` never landed. The reservation is deliberately left in place. Also raised on a profile-picture upload whose body length disagrees with its declared `Content-Length`, so a clean mid-request disconnect isn't stored as a valid picture. | `confirmUpload` in `file.service.js`; `uploadProfilePicture` in `user.service.js` |
 | `UPLOAD_OBJECT_MISMATCH` | 400      | The stored object's size or content type does not match what was reserved and signed. | `confirmUpload` in `file.service.js` |
 | `UPLOAD_ALREADY_CONFIRMED` | 400    | The upload is already finished and the stored object no longer matches what was approved. A repeat confirm on an object that still matches is idempotent and returns the document instead. | `confirmUpload` in `file.service.js` |
 | `UPLOAD_IN_PROGRESS` | 409          | A delete was attempted while an upload URL for the file could still be used. Deleting would refund bytes the held URL can still consume, so the request is refused until the window closes. | `deleteFile` in `file.service.js`, `deleteDirectory` in `directory.service.js` |
@@ -98,13 +96,12 @@ Returned by the admin subsystem (`/api/admin/*`). The route gate (`requireRole` 
 
 ### Profile Picture
 
-Returned by the `/api/users/profile-picture` endpoints (authenticated upload/replace + public serve). See [`docs/architecture/profile-picture-upload.md`](../architecture/profile-picture-upload.md) for the full flow.
+Returned by `POST /api/users/profile-picture` (authenticated upload/replace). There is no serving endpoint — the picture is fetched from R2 via the presigned `profilePictureUrl` on the user payload, so its failures are R2's, not ours. See [`docs/architecture/profile-picture-upload.md`](../architecture/profile-picture-upload.md) for the full flow.
 
 | Code                        | Typical HTTP | Meaning                                                                                                                                            | Where thrown                                |
 | --------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `IMAGE_TOO_LARGE`           | 400          | Upload exceeded the 2 MB profile-picture cap. Tripped mid-stream by the byte counter; the partial file is rolled back.                            | `uploadProfilePicture` in `user.service.js` |
-| `INVALID_IMAGE_TYPE`        | 400          | Uploaded bytes weren't a supported raster image. Magic-byte sniff allows JPEG / PNG / WEBP only; SVG and GIF are rejected. Partial file rolled back. | `uploadProfilePicture` in `user.service.js` |
-| `PROFILE_PICTURE_NOT_FOUND` | 404          | Serve request had a malformed token (not 32 hex chars) or no file exists for that token. The same code covers both so token validity isn't leaked. | `getProfilePicture` in `user.service.js`    |
+| `IMAGE_TOO_LARGE`           | 400          | The declared `Content-Length`, or the bytes actually received, exceeded the environment-configured profile-picture cap (currently 2 MB). Nothing is stored either way. | `uploadProfilePicture` in `user.service.js` |
+| `INVALID_IMAGE_TYPE`        | 400          | The declared `Content-Type` wasn't JPEG / PNG / WEBP, or the leading bytes didn't match what was declared. A magic-byte sniff has to agree with the declaration, because the declaration is what gets stored on the object. | `uploadProfilePicture` in `user.service.js` |
 
 ### Validation
 
@@ -130,7 +127,7 @@ Returned by the `/api/users/profile-picture` endpoints (authenticated upload/rep
 | Code                  | Typical HTTP | Meaning                                                                                                       | Where thrown                                                       |
 | --------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `INTERNAL_ERROR`      | 500          | Catch-all for unexpected errors. Sets `isOperational: false` so the original message is hidden in production. | `globalErrorHandler` fallback when no other handler matches        |
-| `INVALID_INPUT`       | 400          | An upload declared a non-positive or non-integer size, a filename lacked a simple extension, or an admin action was rejected because the target's lifecycle state precludes it (e.g., suspending an already-suspended user, restoring a user who is not soft-deleted, unknown role/status filter). _(Directory / file-rename / drive-import body validation now returns `VALIDATION_ERROR` — moved to Zod.)_ | `initiateUpload` / `validateAndBuildNewFile` in `file.service.js`; state-guard branches across the admin mutation handlers in `src/services/admin/user.service.js` |
+| `INVALID_INPUT`       | 400          | An upload declared a non-positive or non-integer size (a file upload's `size` body field, or a profile picture's `Content-Length` header), a filename lacked a simple extension, an object key was malformed, or an admin action was rejected because the target's lifecycle state precludes it (e.g., suspending an already-suspended user, restoring a user who is not soft-deleted, unknown role/status filter). _(Directory / file-rename / drive-import body validation now returns `VALIDATION_ERROR` — moved to Zod.)_ | `initiateUpload` / `validateAndBuildNewFile` in `file.service.js`; `uploadProfilePicture` in `user.service.js`; `assertKey` / `buildFileKey` / `buildProfilePictureKey` / `presignPut` in `src/lib/r2.js`; state-guard branches across the admin mutation handlers in `src/services/admin/user.service.js` |
 | `RATE_LIMITED`        | 429          | Request exceeded a rate limit. Routed through `globalErrorHandler` as the standard envelope; responses also carry `RateLimit-*` headers.                       | The `handler` in `src/middlewares/rateLimit.middleware.js` — the global backstop or any per-tier limiter (auth/oauth/publicRead/read/mutation/destructive/hardDelete/upload/drive) |
 | `ROUTE_NOT_FOUND`     | 404          | Requested URL didn't match any registered route.                                                              | 404 handler in `app.js`                                            |
 
@@ -208,6 +205,10 @@ Frontend code should always switch on `code` to drive UI behavior. Never parse `
 ### Currently unused codes
 
 `INVALID_TOKEN` and `TOKEN_EXPIRED` are defined in `appErrorCode.js` but not referenced anywhere today. The global handler previously mapped `JsonWebTokenError` / `TokenExpiredError` to them; that mapping was removed since the project uses session-cookie auth, not JWT. The codes are kept in the enum so they're ready if the project ever migrates to JWT.
+
+`PROFILE_PICTURE_NOT_FOUND` is defined in `appErrorCode.js` but is not thrown anywhere today. Profile pictures are fetched straight from R2 through a presigned URL, so a missing object surfaces as R2's own 404 on the `<img>` request rather than as an API error. Kept in the enum in case a serving route is ever reintroduced.
+
+`FILE_DELETE_FAILED` and `FILE_RENAME_FAILED` are defined in `appErrorCode.js` but are not thrown anywhere today. `deleteFile` warn-logs a failed object delete rather than surfacing one — the row is already gone and the DB is the source of truth — and `updateFile` throws `FILE_NOT_FOUND` when its compare-and-set matches nothing. Kept in the enum in case either path ever needs to fail loudly.
 
 `LAST_SUPERADMIN` is defined in `appErrorCode.js` but is not thrown anywhere today. The deployment runs a single-superadmin topology — the only scenarios the guard would catch (demoting or deleting the last superadmin) cannot arise without first creating a second superadmin. Kept in the enum so the guard can be re-added without churning the error contract if topology ever changes.
 
