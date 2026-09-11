@@ -1,6 +1,6 @@
 # File Upload Architecture
 
-> Status: As-built (2026-09-08)
+> Status: As-built (2026-09-10)
 
 This document outlines the architecture, data flow, and security mechanisms behind the Trove backend's File upload system.
 
@@ -96,13 +96,13 @@ The client `PUT`s the file to `uploadUrl` with exactly the `Content-Type` return
 
 On the browser path the cap is enforced twice, and the second time is the one that counts: `initiateUpload` rejects an over-cap **declared** size, and the signed `Content-Length` then bounds what can actually be stored. A client that declares a small size and uploads a large one is refused by Cloudflare, not by us.
 
-On the server-side path (Drive import and the storage cutover) there is no signature to lean on, so the cap is enforced mid-stream by `createByteCounter(perFileCap, remainingBudget)` from `src/utils/byteCounter.js`, which aborts the pipeline the moment cumulative bytes exceed the cap.
+On the server-side path (Drive import) there is no signature to lean on, so the cap is enforced mid-stream by `createByteCounter(perFileCap, remainingBudget)` from `src/utils/byteCounter.js`, which aborts the pipeline the moment cumulative bytes exceed the cap.
 
 ---
 
 ## 💾 Per-User Storage Quota
 
-Each user has a total storage quota (`User.storageLimit`, defaulting to the environment-driven `DEFAULT_STORAGE_LIMIT`). It is enforced by the shared `checkQuota` helper inside the same transaction that reserves the bytes: the service reads the user's denormalized root-directory `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) when the new bytes would exceed the limit. Because the quota read shares the root document that `updateAncestorDirectoryStats` `$inc`s, two concurrent uploads write-conflict on it and `withTransaction` retries the loser against the fresh size — the cap holds without an explicit lock.
+Each user has a total storage quota (`User.storageLimit`, defaulting to the environment-driven `DEFAULT_STORAGE_LIMIT`). It is enforced by the shared `checkQuota` helper, inside the transaction that writes the bytes into the ancestor counters — the reserving transaction on the browser path, the promoting one on the server-side path. The service reads the user's denormalized root-directory `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) when the new bytes would exceed the limit. Because the quota read shares the root document that `updateAncestorDirectoryStats` `$inc`s, two concurrent uploads write-conflict on it and `withTransaction` retries the loser against the fresh size — the cap holds without an explicit lock.
 
 The limit is passed in from `req.user.storageLimit`; the service never re-queries it. A non-numeric or absent limit **fails closed** rather than silently disabling the quota. Google Drive import declares its exemption explicitly by passing `Number.POSITIVE_INFINITY`.
 
@@ -114,13 +114,27 @@ The quota and its per-category usage breakdown are surfaced to the frontend via 
 
 A presigned URL cannot be revoked. Once it has been handed out, anyone holding it can store an object at that key until it expires. So the document that tracks the upload must outlive the URL — if confirm refunded the bytes on a failed check, a client could mint, deliberately fail confirm to get its quota back, then complete the held PUT anyway, repeating until the bucket filled. Every failure path therefore leaves the reservation in place and lets it expire on its own schedule.
 
-> **Known gap:** nothing currently reclaims abandoned uploads, so a cancelled or abandoned upload holds its bytes against the user's quota indefinitely. A cancel endpoint plus reclaim-on-quota-failure is tracked as GitHub issue #86, and must be closed before any production deployment.
+### Reclaiming abandoned reservations
+
+Bytes reserved for an upload that never completes are refunded opportunistically, at the start of the next upload the same user starts. `releaseExpiredFiles(userId)` runs first in **both** `initiateUpload` and `uploadFileFromServer`: it deletes that user's `pending` rows whose `uploadExpiresAt` has already passed, subtracts their bytes and file counts from the ancestor chain, and returns the deleted rows so their R2 objects can be dropped afterwards.
+
+Three details carry the design:
+
+- **Its own transaction, committed before the mint's transaction opens.** The refund lands before `checkQuota` reads the root directory's `size`, so the caller sees the reclaimed headroom on *this* request rather than the next one — and a quota check that rejects the new upload cannot roll the refund back along with it.
+- **Capped at `MAX_EXPIRED_FILES_PER_SWEEP` (25) per call.** A user with a backlog drains it across several uploads instead of paying for the whole sweep on one request. Each delete is re-scoped to `{ _id, userId, status: "pending" }`, so a row another request has already promoted or removed is skipped rather than refunded twice.
+- **Objects are dropped only for rows that are actually gone.** If the sweep aborts, the returned list is discarded instead of acted on — deleting an object for a row that rolled back would leave a live document naming a key with nothing behind it.
+
+There is no cancel endpoint, by choice. Reclaim is tied to the next upload because that is the only moment a stale reservation costs anyone anything; a client that abandons an upload and never comes back is not holding a resource that is being contended for.
+
+`deleteFile` follows the same rule from the other direction: its refund is guarded on `deletedCount === 1`, so a delete that races another delete of the same file returns cleanly without decrementing the ancestor chain a second time.
 
 ---
 
 ## 🌐 Server-Side Uploads
 
-`uploadFileFromServer(parentDirId, userId, fileName, fileStream, totalStorageLimit, perFileCap)` covers the cases where the bytes reach the server first and a presigned PUT is therefore not an option — Google Drive import, and the local-disk storage cutover. It shares `validateAndBuildNewFile` and `checkQuota` with the browser path so the two cannot drift apart, streams through a byte counter into `putObject`, and creates the row as `ready` in one step. There is no mint/confirm handshake because there is no untrusted client in the middle.
+`uploadFileFromServer(parentDirId, userId, fileName, fileStream, totalStorageLimit, perFileCap)` covers the cases where the bytes reach the server first and a presigned PUT is therefore not an option — today that is Google Drive import. It shares `validateAndBuildNewFile` and `checkQuota` with the browser path so the two cannot drift apart.
+
+The row still comes first here too. A `pending` row carrying the final `objectKey` and `size: 0` is committed **before** anything is written to R2, so an object can never exist that no document names. The stream then runs through a byte counter into `putObject`, and a second transaction enforces the quota against the counted size and flips the row to `ready`. The claim reserves a file slot rather than bytes — the real size is unknown until the stream ends — so every failure path after it refunds nothing but that slot and deletes the object. There is no client-driven confirm step, because there is no untrusted client in the middle.
 
 See `../architecture/drive-import.md` for how the import path uses it.
 
