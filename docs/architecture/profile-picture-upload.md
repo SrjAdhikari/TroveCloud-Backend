@@ -1,6 +1,6 @@
 # Profile Picture Upload
 
-> **Status:** As-built (2026-09-10). Lets users upload and replace their profile picture in the `/api/users` module. Bytes live in Cloudflare R2 under a stored `User.profilePictureKey`; every user payload carries a freshly presigned, short-lived `profilePictureUrl` instead of a stable route. *(Informally "avatar"; all API identifiers use `profilePicture` / `profile-picture`.)*
+> **Status:** As-built (2026-09-10). Lets users upload and replace their profile picture in the `/api/users` module. Bytes live in Cloudflare R2 under a stored `User.profilePictureKey`; every user payload carries a resolved, short-lived `profilePictureUrl` instead of a stable route — a presigned R2 URL when the user uploaded a picture, the OAuth provider's URL otherwise. *(Informally "avatar"; all API identifiers use `profilePicture` / `profile-picture`.)*
 
 ## Context
 
@@ -16,7 +16,7 @@ The frontend still reads a single field and renders it directly in an `<img>` �
 
 **In scope:**
 - `POST /api/users/profile-picture` — upload **and replace** the authenticated user's picture (raw image body).
-- A presigned, one-hour `profilePictureUrl` on every user payload. There is **no** serving route: the browser loads the picture from R2 directly.
+- A resolved `profilePictureUrl` on every user payload: an uploaded picture is presigned for one hour, anything else falls back to the provider URL or `null`. There is **no** serving route: the browser loads the picture from R2 directly.
 - No OAuth login re-sync of `name` + `profilePicture` — the block stays commented out in `oauth.service.js`, retained in case it is ever wanted back.
 - Magic-byte image validation (JPEG / PNG / WEBP only), an environment-configured size cap, old-object cleanup on replace.
 
@@ -33,7 +33,7 @@ The frontend still reads a single field and renders it directly in an `<img>` �
 | Photo field | Two fields with a precedence order: `profilePictureKey` (our R2 object) wins, `profilePicture` (the provider's URL, OAuth-seeded) is the fallback | The two are different kinds of thing — one is a key we must presign, one is a URL we can hand over untouched. Collapsing them into one column would mean parsing a string to decide which it is. |
 | Source-of-truth conflict | After signup the app owns the photo. OAuth **seeds** `profilePicture` (and `name`) once at account creation; the **login re-sync is disabled** (commented out) | Dissolves the two-writers clobber for both fields now that each is user-editable. Cost: provider-side changes won't auto-propagate (user can re-upload / re-edit). |
 | Visibility | Any party the app shows the URL to can view the picture (owner + other users) | Pictures are meant to be seen. |
-| Serving model | **Presigned GET, minted per response.** No serving route exists; `formatUser` presigns the stored key and returns `profilePictureUrl` alongside the rest of the user | An `<img>` can't carry custom auth, and a signed URL doesn't need it — the browser fetches from R2 with no cookie and no round trip through Express. Keeps the "server never proxies object bytes" rule that the file paths already follow. |
+| Serving model | **Presigned GET, resolved per response.** No serving route exists; `formatUser` presigns the stored key — or falls back to the provider URL when there is no key — and returns the result as `profilePictureUrl` | An `<img>` can't carry custom auth, and a signed URL doesn't need it — the browser fetches from R2 with no cookie and no round trip through Express. Keeps the "server never proxies object bytes" rule that the file paths already follow. |
 | URL lifetime | `PROFILE_PICTURE_URL_TTL_SECONDS` = one hour, same as file downloads | A signed URL is a bearer capability that outlives session revocation and `suspendedAt`, so it stays short even though the object itself is immutable. |
 | Signature reuse | `presignGet` quantizes its signing date to a fixed window | The same key therefore yields a byte-identical URL for the life of that window, so repeat renders hit the browser's cache instead of refetching a picture that never changed. A fresh signature per response would produce a new URL string every time. |
 | Storage layout | `profile-pictures/<userId>/<32 hex token>` — **no extension**; the type is stored as the object's `Content-Type` at upload | The owner prefix groups one user's avatars under a single listable path. The token is the cache-buster and makes the key unguessable; the type is recorded once rather than re-sniffed on every read. |
@@ -75,7 +75,7 @@ The only other model-layer change is in `oauth.service.js` — the existing-user
 | Method & path | Auth | Purpose |
 |---|---|---|
 | `POST /api/users/profile-picture` | session (`userRouter.use(authenticate)`) | Upload / replace own picture; returns the updated user (same projection as `PATCH /profile`) |
-| `GET /api/auth/me` | session | Returns `profilePictureUrl`, presigned for this response |
+| `GET /api/auth/me` | session | Returns `profilePictureUrl`, resolved for this response. Within one signing window the presigned form is byte-identical to the previous response's |
 
 **There is no picture-serving endpoint.** Every route in `user.routes.js` sits below `userRouter.use(authenticate)`; the bytes are fetched by the browser from R2 using the presigned URL, so nothing unauthenticated needs to exist on our side.
 

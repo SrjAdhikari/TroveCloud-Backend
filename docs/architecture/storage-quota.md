@@ -69,7 +69,8 @@ The quota is enforced by the shared `checkQuota` helper in `src/services/file.se
 | File whose extension isn't recognised, or has no extension | Counted under the `Other` category |
 | 0-byte file | Surfaces its category in the breakdown with `size: 0` |
 | Upload would exceed the quota | Rejected with `STORAGE_LIMIT_EXCEEDED` (400). The browser path never creates a row; the server-side path deletes its claim row and the object it already wrote |
-| Upload authorised but never completed | Its declared bytes stay reserved until `uploadExpiresAt`, then are refunded by the reclaim sweep at the head of the owner's next upload |
+| Browser upload authorised but never completed | Its declared bytes stay reserved until `uploadExpiresAt`, then are refunded by the reclaim sweep at the head of the owner's next upload |
+| Server-side claim that never promotes | Only a file slot is held, not bytes — the claim commits at `size: 0` and bytes are added when it flips to `ready`, so an abandoned one costs the quota nothing until the sweep removes the row |
 | Two concurrent uploads near the limit | One commits; the other write-conflicts on the root doc, retries against the fresh size, and is accepted or rejected correctly |
 | `used` vs `sum(breakdown)` | Both derive from the same files; in rare denormalization drift `used` (root size) is treated as authoritative |
 
