@@ -20,6 +20,7 @@ import {
 	uploadFileFromServer,
 	initiateUpload,
 } from "../../../src/services/file.service.js";
+import { uploadProfilePicture } from "../../../src/services/user.service.js";
 import { deleteObject, getObjectMetadata } from "../../../src/lib/r2.js";
 
 import { ROLES } from "../../../src/constants/roles.js";
@@ -34,6 +35,11 @@ import {
 // A hard delete removes the document that names the key, so `tests/setup.js`
 // can no longer find it. try/catch around the whole call, never `.catch()`:
 // `assertKey` inside `deleteObject` throws synchronously (invariant 3).
+const PNG = Buffer.concat([
+	Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+	Buffer.alloc(56, 1),
+]);
+
 const createdKeys = new Set();
 const track = (key) => createdKeys.add(key);
 
@@ -397,6 +403,53 @@ describe("admin/user.service — hardDeleteUser", () => {
 
 		expect(await getObjectMetadata(objectKey)).toBeNull();
 		expect(await File.countDocuments({ userId: victim._id })).toBe(0);
+	});
+
+	it("removes the user's profile-picture object too", async () => {
+		const superadmin = await createTestUser({ role: ROLES.SUPERADMIN });
+		const victim = await createTestUser();
+
+		const { profilePictureKey } = await uploadProfilePicture(
+			victim._id,
+			Readable.from(PNG),
+			{ contentType: "image/png", contentLength: String(PNG.length) },
+		);
+		track(profilePictureKey);
+
+		await hardDeleteUser(superadmin, victim._id);
+
+		expect(await getObjectMetadata(profilePictureKey)).toBeNull();
+	});
+
+	it("wipes a user who never uploaded an avatar", async () => {
+		const superadmin = await createTestUser({ role: ROLES.SUPERADMIN });
+		const victim = await createTestUser();
+
+		expect(victim.profilePictureKey).toBeNull();
+
+		const tally = await hardDeleteUser(superadmin, victim._id);
+
+		expect(tally.filesDeleted).toBe(0);
+		expect(await User.findById(victim._id)).toBeNull();
+	});
+
+	it("still wipes the account when the avatar object is already gone", async () => {
+		const superadmin = await createTestUser({ role: ROLES.SUPERADMIN });
+		const victim = await createTestUser();
+
+		const { profilePictureKey } = await uploadProfilePicture(
+			victim._id,
+			Readable.from(PNG),
+			{ contentType: "image/png", contentLength: String(PNG.length) },
+		);
+
+		// Drop it behind the service's back: the delete must stay best-effort.
+		await deleteObject(profilePictureKey);
+
+		const tally = await hardDeleteUser(superadmin, victim._id);
+
+		expect(tally.directoriesDeleted).toBeGreaterThanOrEqual(0);
+		expect(await User.findById(victim._id)).toBeNull();
 	});
 });
 
