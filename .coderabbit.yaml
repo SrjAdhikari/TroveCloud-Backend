@@ -1,0 +1,35 @@
+language: en-US
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "src/**/*.js"
+      instructions: |
+        Mongoose `select: false` fields and projections.
+
+        Several schema fields are declared `select: false` so they are withheld
+        by default: `User.password`, `User.otp`, `User.otpExpiresAt`,
+        `File.objectKey`. There are two correct ways to read one back, and they
+        are NOT interchangeable:
+
+        1. Bare override, when nothing else is projected — `.select("+objectKey")`.
+           The `+` prefix un-hides the field and leaves the default projection
+           otherwise intact.
+        2. Named inside an inclusive projection, when specific fields are listed —
+           `File.find(filter, "_id objectKey")` or `.select("_id objectKey")`.
+           Here the field is named PLAINLY, with no `+` prefix.
+
+        Do not suggest adding a `+` prefix to a field that sits inside an
+        inclusive projection. `"_id +objectKey"` is not equivalent to
+        `"_id objectKey"` — it breaks the projection and the field comes back
+        undefined. `src/services/admin/user.service.js` uses
+        `File.find({ userId }, "_id objectKey", { session })` deliberately for
+        this reason, as does the profile-picture read in
+        `src/services/user.service.js`.
+
+        Before proposing that a field be made `select: false`, check whether a
+        formatter already strips it from every response. `formatUser` in
+        `src/services/user.service.js` is the single point where user documents
+        are shaped for the API, and it removes `profilePictureKey` there.
