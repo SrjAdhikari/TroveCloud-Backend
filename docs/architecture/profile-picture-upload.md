@@ -1,14 +1,14 @@
 # Profile Picture Upload
 
-> **Status:** As-built (2026-06-02). Lets users upload and replace their profile picture in the `/api/users` module, served via public capability URLs. No schema migration — reuses the existing `profilePicture` field. *(Informally "avatar"; all API identifiers use `profilePicture` / `profile-picture`.)*
+> **Status:** As-built (2026-09-10). Lets users upload and replace their profile picture in the `/api/users` module. Bytes live in Cloudflare R2 under a stored `User.profilePictureKey`; every user payload carries a resolved, short-lived `profilePictureUrl` instead of a stable route — a presigned R2 URL when the user uploaded a picture, the OAuth provider's URL otherwise. *(Informally "avatar"; all API identifiers use `profilePicture` / `profile-picture`.)*
 
 ## Context
 
-Today a user's photo lives in `User.profilePicture` (`String`, default `null`). The **only** writer is OAuth: `oauth.service.js` seeds it at account creation and **re-writes it on every Google/GitHub login** (along with `name`) to the provider's current values. Email/password users have no way to set a photo at all.
+A user's photo has two possible origins: OAuth, which seeds `profilePicture` from the provider at account creation, and an upload by the user. Email/password users have only the second.
 
-Two facts make that login re-sync a problem now: `name` became user-editable via `PATCH /profile`, and this work makes the picture user-editable too. A login re-sync would clobber whichever the user changed in our app. So this work both adds picture upload **and disables the login re-sync**, making our app the source of truth for `name` and `profilePicture` after signup.
+Both `name` and the picture are user-editable in-app, so the app is the source of truth for them after signup. That is why `oauth.service.js` seeds those fields once and does **not** re-sync them on later logins — a login that copied the provider's current values back over them would silently discard whatever the user set here.
 
-The frontend continues to read a single field — `profilePicture` — and render it directly in an `<img>`, whether it points at a provider URL or at our own serving route. The design is dependency-free: it reuses the raw-stream upload pattern from `file.service.js` (no multipart parser) and adds no image-processing library.
+The frontend still reads a single field and renders it directly in an `<img>` — `profilePictureUrl`, which resolves to either the provider's URL or a presigned R2 URL for a picture the user uploaded. The frontend never has to decide which; the raw `profilePicture` field is still present on the payload, and only `profilePictureKey` is withheld. The design adds no image-processing library and no multipart parser.
 
 ---
 
@@ -16,17 +16,13 @@ The frontend continues to read a single field — `profilePicture` — and rende
 
 **In scope:**
 - `POST /api/users/profile-picture` — upload **and replace** the authenticated user's picture (raw image body).
-- `GET /api/users/profile-picture/:id` — **public, unauthenticated** route that streams picture bytes by capability token.
-- Disable the OAuth login re-sync of `name` + `profilePicture` (commented out, retained for future use).
-- New required env var `API_URL` (the API's own public origin) for building absolute picture URLs.
-- Magic-byte image validation (JPEG / PNG / WEBP only), an environment-configured size cap, old-file cleanup on replace.
+- A resolved `profilePictureUrl` on every user payload: an uploaded picture is presigned for one hour, anything else falls back to the provider URL or `null`. There is **no** serving route: the browser loads the picture from R2 directly.
+- No OAuth login re-sync of `name` + `profilePicture` — the block stays commented out in `oauth.service.js`, retained in case it is ever wanted back.
+- Magic-byte image validation (JPEG / PNG / WEBP only), an environment-configured size cap, old-object cleanup on replace.
 
 **Explicitly out of scope (deferred):**
-- **`DELETE /api/users/profile-picture` (clear photo back to `null`).** Follow-up PR. Replacement already cleans up the old file, so deferring this does not leak disk — it only postpones the "remove my photo entirely" action.
+- **`DELETE /api/users/profile-picture` (clear photo back to `null`).** Replacement already cleans up the previous object, so its absence does not accumulate storage — it only postpones the "remove my photo entirely" action.
 - **Image resizing / normalization (e.g. `sharp`).** Stored as-uploaded. Add later only if thumbnail variants are needed.
-- Docs sync (`docs/api/error-codes.md` and the frontend API handoff reference) — ships in the post-feature docs PR, consistent with the already-parked profile docs.
-
-> The earlier "OAuth `name`-clobber" follow-up is no longer separate — disabling the login re-sync (below) handles it directly.
 
 ---
 
@@ -34,47 +30,43 @@ The frontend continues to read a single field — `profilePicture` — and rende
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Photo field | Reuse the one `profilePicture` field; no new schema field, no Atlas migration | A profile picture is a profile picture — the field already holds "a URL you can render"; uploads just store our URL there. |
+| Photo field | Two fields with a precedence order: `profilePictureKey` (our R2 object) wins, `profilePicture` (the provider's URL, OAuth-seeded) is the fallback | The two are different kinds of thing — one is a key we must presign, one is a URL we can hand over untouched. Collapsing them into one column would mean parsing a string to decide which it is. |
 | Source-of-truth conflict | After signup the app owns the photo. OAuth **seeds** `profilePicture` (and `name`) once at account creation; the **login re-sync is disabled** (commented out) | Dissolves the two-writers clobber for both fields now that each is user-editable. Cost: provider-side changes won't auto-propagate (user can re-upload / re-edit). |
 | Visibility | Any party the app shows the URL to can view the picture (owner + other users) | Pictures are meant to be seen. |
-| Serving model | **Public capability URL** — a random unguessable token is the route `:id`; a public no-auth route streams by token | An `<img>` can't carry custom auth, so a no-auth token URL renders directly wherever the app shows a user — no cookie dependency (works the same whether the FE is same-site or cross-origin). Non-enumerable. New token per upload gives free cache-busting. |
-| Route param | `:id` is a **128-bit random hex token, not a Mongo ObjectId**; validated inline by `^[a-f0-9]{32}$`. `validateId` is deliberately **not** applied | A guessable ObjectId would defeat the non-enumerable capability design. Named `:id` for route-convention consistency only. |
-| Storage layout | `storage/profile-pictures/<token>` — **no extension on disk**; MIME derived by sniffing the file head on read | Keeps the URL an extensionless id and makes cleanup a single exact-path delete. The same `mimeType` sniffer runs on upload (validate) and serve (set `Content-Type`). |
-| Upload transport | Raw image body streamed to disk (`pipeline(req, …)`), same as `file.service.js` | Zero new dependencies; one consistent upload pattern across the codebase. |
-| Type validation | **Magic-byte sniff** of the first bytes, not `Content-Type`/filename. Allow JPEG / PNG / WEBP. Reject SVG and GIF | The bytes must genuinely be a supported raster image. SVG is XML and can carry executable script — explicitly excluded. |
-| Size cap | `MAX_PROFILE_PICTURE_SIZE` (currently 2 MB), enforced mid-stream via the existing `createByteCounter` | Plenty for a picture; bounds disk/bandwidth. Raw stream bypasses the 1 MB `express.json` limit, so the counter is the real guard. Read from the environment through `getNumberEnv` in `src/constants/env.js`, so clients should surface the error rather than mirror the number. |
-| URL form | **Absolute** — `https://<API_URL>/api/users/profile-picture/<token>`, from a new required `API_URL` env var | Makes `profilePicture` a uniform "render directly" field; FE treats provider and uploaded URLs identically. Required env var fails loud at boot if misconfigured. |
-| Old-file cleanup | On replace, parse the token from the previous `profilePicture` **only when it matches our `/api/users/profile-picture/` prefix** (validated by strict regex), then delete that file. Remote/`null` previous values → nothing to delete | Prevents orphaned files without adding a schema field; preserves the "zero migration" promise. |
-| Caching | `Cache-Control: public, max-age=31536000, immutable` + correct sniffed `Content-Type` + `X-Content-Type-Options: nosniff` | Safe because the URL changes on every re-upload. `nosniff` is safe because we send the real, sniffed type. |
-| Code organization | All endpoints in existing `user.service.js` / `user.controller.js` / `user.routes.js`. Public serve route registered **before** `userRouter.use(authenticate)`. Generic image sniffing in new `src/utils/mimeType.js`; path/URL/token helpers added to existing `src/utils/storagePath.js` | Profile-picture data belongs to the user module; only the image-type sniffer is generic enough to live on its own. `routes/index.js` needs no change. |
+| Serving model | **Presigned GET, resolved per response.** No serving route exists; `formatUser` presigns the stored key — or falls back to the provider URL when there is no key — and returns the result as `profilePictureUrl` | An `<img>` can't carry custom auth, and a signed URL doesn't need it — the browser fetches from R2 with no cookie and no round trip through Express. Keeps the "server never proxies object bytes" rule that the file paths already follow. |
+| URL lifetime | `PROFILE_PICTURE_URL_TTL_SECONDS` = one hour, same as file downloads | A signed URL is a bearer capability that outlives session revocation and `suspendedAt`, so it stays short even though the object itself is immutable. |
+| Signature reuse | `presignGet` quantizes its signing date to a fixed window | The same key therefore yields a byte-identical URL for the life of that window, so repeat renders hit the browser's cache instead of refetching a picture that never changed. A fresh signature per response would produce a new URL string every time. |
+| Storage layout | `profile-pictures/<userId>/<32 hex token>` — **no extension**; the type is stored as the object's `Content-Type` at upload | The owner prefix groups one user's avatars under a single listable path. The token is the cache-buster and makes the key unguessable; the type is recorded once rather than re-sniffed on every read. |
+| Upload transport | Raw image body buffered in memory, then a single `putObject` | Unlike the file paths, the server does see these bytes — which is what makes the magic-byte check possible before anything is stored. The 2 MB cap keeps the buffer bounded. |
+| Type validation | Declared `Content-Type` must be JPEG / PNG / WEBP **and** the leading bytes must match that declaration. Reject SVG and GIF | Checking the declaration alone trusts the client; checking the bytes alone would let a client store a valid PNG under a `Content-Type` R2 will later echo back. Both must agree. SVG is XML and can carry executable script — explicitly excluded. |
+| Size cap | `MAX_PROFILE_PICTURE_SIZE` (currently 2 MB), checked against the declared `Content-Length` up front and again against the bytes actually received | Plenty for a picture; bounds memory and bandwidth. A raw body bypasses the 1 MB `express.json` limit, so this is the only guard. Read from the environment through `getNumberEnv` in `src/constants/env.js`, so clients should surface the error rather than mirror the number. |
+| Response field | `profilePictureUrl` on the user payload; `formatUser` strips `profilePictureKey` and nothing else, so the OAuth-seeded `profilePicture` still ships alongside it | The key plus a bucket name is the whole address of the object, so the key is the one part that stays server-side. The client only ever needs something it can put in `src`. |
+| Old-object cleanup | On replace, delete the previous `profilePictureKey`'s object **after** the new key is committed to the document, and only when it differs | Ordering means a crash leaves an orphaned object (reconcilable) rather than a user whose picture 404s (not). Failure to delete is warn-logged, never fatal. |
+| Caching | `Cache-Control: private, max-age=<TTL>` written onto the object at upload | The object is served by R2, not by us, so caching has to be metadata on the object. `private` because the URL is a bearer token — a shared cache must not keep a copy for the next requester. |
+| Code organization | All of it in existing `user.service.js` / `user.controller.js` / `user.routes.js`, behind `userRouter.use(authenticate)`. Generic image sniffing in `src/utils/mimeType.js`; every R2 call through `src/lib/r2.js` | Profile-picture data belongs to the user module; only the image-type sniffer is generic enough to live on its own. `routes/index.js` needs no change. |
 
 ---
 
 ## Data model
 
-**No schema change.** `User.profilePicture` is reused as-is:
+Two fields on `User`, read in precedence order:
 
 ```js
-profilePicture: { type: String, default: null }
+profilePicture:    { type: String, default: null },
+profilePictureKey: {
+    type: String,
+    default: null,
+    match: /^profile-pictures\/[a-f0-9]{24}\/[a-f0-9]{32}$/,
+}
 ```
 
-It holds one of: a provider photo URL (OAuth-seeded), an absolute URL we built (`https://<API_URL>/api/users/profile-picture/<token>`), or `null`.
+`profilePicture` holds the provider photo URL that OAuth seeded at signup, or `null`. `profilePictureKey` holds the R2 key of a picture the user uploaded. `resolveProfilePictureUrl` prefers the key: if one is set it presigns it, otherwise it falls back to `profilePicture`, otherwise `null`.
 
-The only model-layer change is in `oauth.service.js` — the existing-user **login re-sync is commented out** so a login cannot clobber a user-edited name or an uploaded picture. The seed at `User.create` is untouched.
+The `match` pattern is a second line of defence behind `assertKey` in `src/lib/r2.js` — a key is interpolated straight into an S3 request, so a value that escaped its own prefix would address someone else's object. It is mirrored in the Atlas `$jsonSchema` validator, so a write that goes around Mongoose is still rejected by the database. Mongoose's own `match` runs on an `updateOne` only when `runValidators: true` is passed, which the upload path does.
 
-```js
-// Refresh denormalized profile fields only when they've changed.
-// DISABLED: name (PR #47) and profilePicture are now user-editable in-app, so the app is the
-// source of truth after signup. Re-syncing here would clobber the user's own changes on every
-// login. Kept commented in case provider-profile re-sync is ever wanted again.
-// if (existingUser.name !== name || existingUser.profilePicture !== picture) {
-//     await User.updateOne(
-//         { _id: existingUser._id },
-//         { name, profilePicture: picture },
-//         { runValidators: true },
-//     );
-// }
-```
+A partial index on `{ profilePictureKey: { $type: "string" } }` covers only the users who have actually uploaded one, rather than indexing the `null` that every other user carries.
+
+The only other model-layer change is in `oauth.service.js` — the existing-user **login re-sync is commented out** so a login cannot clobber a user-edited name or an uploaded picture. The seed at `User.create` (which still writes `profilePicture`) is untouched.
 
 ---
 
@@ -83,93 +75,81 @@ The only model-layer change is in `oauth.service.js` — the existing-user **log
 | Method & path | Auth | Purpose |
 |---|---|---|
 | `POST /api/users/profile-picture` | session (`userRouter.use(authenticate)`) | Upload / replace own picture; returns the updated user (same projection as `PATCH /profile`) |
-| `GET /api/users/profile-picture/:id` | **public** (registered before `authenticate`) | Stream picture bytes by capability token |
-| `GET /api/auth/me` | session | **Unchanged** — already returns `profilePicture` |
+| `GET /api/auth/me` | session | Returns `profilePictureUrl`, resolved for this response. Within one signing window the presigned form is byte-identical to the previous response's |
 
-**Route ordering invariant:** the public `GET /profile-picture/:id` must be registered in `user.routes.js` **before** `userRouter.use(authenticate)`. Moving it below the middleware would silently make it require a session and break `<img>` loading.
+**There is no picture-serving endpoint.** Every route in `user.routes.js` sits below `userRouter.use(authenticate)`; the bytes are fetched by the browser from R2 using the presigned URL, so nothing unauthenticated needs to exist on our side.
+
+Any response that carries a user runs it through `formatUser`, which is what mints `profilePictureUrl`. A new endpoint returning a user must call it too — returning a raw lean document would both omit the URL and leak `profilePictureKey`.
 
 ---
 
 ## Upload flow (`POST /api/users/profile-picture`)
 
-1. **Stream with validation:** `pipeline(req, typeValidator.stream, counter.stream, createWriteStream(path))`, after `mkdir(profilePicturesDir, { recursive: true })`.
-   - `typeValidator` (from `mimeType.js`) sniffs the first 16 bytes: JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`, WEBP `RIFF…WEBP` **plus** a `VP8 `/`VP8L`/`VP8X` codec chunk at offset 12 (a bare `RIFF…WEBP` prefix is rejected). Unsupported → trips with `INVALID_IMAGE_TYPE` (400).
-   - `createByteCounter(MAX_PROFILE_PICTURE_SIZE)` trips → `IMAGE_TOO_LARGE` (400).
-   - `path` = `storage/profile-pictures/<token>`, `token = crypto.randomBytes(16).toString("hex")`.
-   - Any trip rolls back the partial file (same pattern as `file.service.js`).
-2. **Persist then clean up** (ordering avoids ever losing the picture): write new file → capture old `profilePicture` → set `profilePicture` to the new absolute URL → best-effort delete the **old local file** if it was one of ours.
+1. **Check the headers before reading a byte** (`validateProfilePictureHeaders`). The `Content-Type` — media type only, parameters dropped — must be `image/jpeg`, `image/png`, or `image/webp` (`INVALID_IMAGE_TYPE`, 400). `Content-Length` must be a positive integer (`INVALID_INPUT`, 400) and within `MAX_PROFILE_PICTURE_SIZE` (`IMAGE_TOO_LARGE`, 400). Rejecting on the declaration first means an oversized body is refused before it is buffered.
+2. **Buffer the body** (`readProfilePictureBody`). Chunks accumulate with a running total; exceeding the cap throws `IMAGE_TOO_LARGE` mid-read rather than after. A body whose real length disagrees with the declared `Content-Length` throws `UPLOAD_INCOMPLETE` (400) — a truncated request must not be stored as a valid picture.
+3. **Sniff and cross-check** (`detectVerifiedImageType`). `detectImageType` reads the leading bytes: JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`, WEBP `RIFF…WEBP` **plus** a `VP8 ` / `VP8L` / `VP8X` codec chunk at offset 12 (a bare `RIFF…WEBP` prefix is rejected). The detected type must **equal the declared one** — matching the allowlist is not enough, because the declared type is what gets written onto the object and echoed back to browsers later.
+4. **Read the current key, then mint a new one and write the object.** The user's existing `profilePictureKey` is read first — that is where the object to clean up later comes from — and a miss here throws `USER_NOT_FOUND` with nothing yet written to undo. `buildProfilePictureKey(userId, randomBytes(16).toString("hex"))` produces `profile-pictures/<userId>/<token>`; `putObject` stores the buffer with the verified `Content-Type` and the `private, max-age=<TTL>` cache header. A new token per upload means the write never overwrites the picture currently in use.
+5. **Commit the key, then clean up.** `User.findByIdAndUpdate` sets `profilePictureKey`. If that update fails or the user has vanished (`USER_NOT_FOUND`), the object just written is deleted before the error propagates. Only once the new key is committed is the previous object deleted, and only if it differs — a failure there is warn-logged, never fatal, because an orphaned object is recoverable and a missing picture is not.
 
-Returns `{ success, message, data: <updated user, sensitive fields excluded> }`.
+Returns `{ success, message, data: <updated user, sensitive fields excluded> }`, with `profilePictureUrl` already resolved by `formatUser` in the controller.
 
 ---
 
-## Serving flow (`GET /api/users/profile-picture/:id`)
+## Serving flow (`resolveProfilePictureUrl`)
 
-Thin and public:
+There is no request to serve. `formatUser` calls `resolveProfilePictureUrl` while building any user payload:
 
-1. Validate `:id` against `^[a-f0-9]{32}$` (path-traversal guard; not via `validateId`).
-2. Resolve `storage/profile-pictures/<id>`; missing file → `PROFILE_PICTURE_NOT_FOUND` (404) via the global error handler.
-3. Sniff MIME from the file head (reuse `mimeType.js`) → `res.type(mime)`, `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`.
-4. `res.sendFile(path)`.
+1. `profilePictureKey` set → `presignGet(key, { inline: true, ttl: PROFILE_PICTURE_URL_TTL_SECONDS })`. `inline` so the browser renders it in an `<img>` instead of downloading it.
+2. Presigning throws → warn-log and return `null`. A key that cannot be signed degrades to "this user has no picture" rather than failing the whole request, which would take down `GET /api/auth/me` for one bad row.
+3. No key → fall back to `profilePicture` (the OAuth-seeded provider URL), else `null`.
+
+`formatUser` then strips `profilePictureKey` off the document and attaches the resolved value as `profilePictureUrl`.
 
 ---
 
 ## Security notes
 
-- **No SVG/GIF, magic-byte enforced** — defeats `Content-Type`/extension spoofing and SVG-borne script.
-- **Strict token regex** on the serving route and on cleanup parsing — no path traversal into `storage/`.
-- **Capability tokens** (128-bit random) are unguessable and never enumerable by userId.
-- **Size cap mid-stream** — the request is aborted as soon as it exceeds the configured cap, not after buffering.
+- **No SVG/GIF, magic-byte enforced against the declaration** — defeats `Content-Type` spoofing and SVG-borne script. The stored `Content-Type` is one R2 will echo to every future viewer, so it has to be a type the bytes actually are.
+- **Keys are pattern-checked twice** — by the schema `match` on write and by `assertKey` on every R2 call. A key is interpolated into an S3 request path, so a value that escaped its `profile-pictures/<userId>/` prefix would address another user's object.
+- **128-bit token per upload** — the key is unguessable and not derivable from the `userId` alone, so knowing who someone is does not tell you where their picture lives.
+- **Signed URLs are bearer capabilities** — anyone holding one reads that object until it expires, past logout and past suspension. Hence the one-hour TTL and `Cache-Control: private`, which keeps shared caches from serving one user's URL to the next requester.
+- **Size cap before and during the read** — the declared `Content-Length` is rejected up front, and the running total is rejected again while buffering, so neither a lying header nor a chunked body gets past it.
 
 ---
 
-## Files touched
+## Where the code lives
 
-| File | Type | Description |
-|---|---|---|
-| `src/utils/mimeType.js` | New | Magic-byte sniff (`detectImageType`) + a head-validating pass-through transform |
-| `src/utils/storagePath.js` | Modified | Add `PROFILE_PICTURES_ROOT`, `buildProfilePicturePath`, `buildProfilePictureUrl`, `parseProfilePictureToken` |
-| `src/services/user.service.js` | Modified | Add `uploadProfilePicture` (upload/replace + old-file cleanup) and `getProfilePicture` (serve resolver) |
-| `src/controllers/user.controller.js` | Modified | Add `uploadProfilePictureHandler`, `getProfilePictureHandler` |
-| `src/routes/user.routes.js` | Modified | Public `GET /profile-picture/:id` (before `authenticate`) + authed `POST /profile-picture` |
-| `src/services/oauth.service.js` | Modified | Comment out the existing-user login re-sync block |
-| `src/constants/appErrorCode.js` | Modified | Add `INVALID_IMAGE_TYPE`, `IMAGE_TOO_LARGE`, `PROFILE_PICTURE_NOT_FOUND` |
-| `src/constants/env.js` | Modified | Add required `API_URL` |
-| `.env` (local) | Modified | Add `API_URL` — gitignored, not in the PR diff; required at boot |
-| `src/middlewares/error.middleware.js` | Modified | `globalErrorHandler` returns `next(err)` when `res.headersSent`, so a mid-stream `sendFile` failure delegates to Express's finalhandler instead of throwing `ERR_HTTP_HEADERS_SENT` (shipped as the `fix(error-middleware)` commit; also closes a pre-existing `getFileHandler` exposure) |
-| `tests/services/user.service.test.js` | Modified | TDD profile-picture service behaviors |
-| `tests/middlewares/error.middleware.test.js` | Modified | Test the `headersSent` delegation |
-| `tests/services/oauth.service.test.js` | Modified | Swap refresh-truncation test for the no-clobber test |
-| `tests/utils/mimeType.test.js` | New | TDD magic-byte validation |
-| `tests/utils/storagePath.test.js` | New | TDD path/URL/token helpers |
+| File | Responsibility |
+|---|---|
+| `src/models/user.model.js` | `profilePictureKey` field, its key pattern, and the partial index over it |
+| `src/schemas/user.schema.js` | The Atlas `$jsonSchema` mirror of that field |
+| `src/services/user.service.js` | `uploadProfilePicture` (validate → buffer → sniff → put → commit → clean up), `resolveProfilePictureUrl`, `formatUser` |
+| `src/controllers/user.controller.js` | `uploadProfilePictureHandler`; also runs `formatUser` over every user it returns |
+| `src/routes/user.routes.js` | `POST /profile-picture`, behind `authenticate` and `uploadLimiter` |
+| `src/lib/r2.js` | `buildProfilePictureKey`, `assertKey`, `putObject`, `presignGet`, `deleteObject`, `PROFILE_PICTURE_URL_TTL_SECONDS` |
+| `src/utils/mimeType.js` | `detectImageType` — magic-byte sniff for JPEG / PNG / WEBP |
+| `src/services/oauth.service.js` | The commented-out existing-user login re-sync |
+| `src/constants/appErrorCode.js` | `INVALID_IMAGE_TYPE`, `IMAGE_TOO_LARGE` |
+| `src/constants/env.js` | `MAX_PROFILE_PICTURE_SIZE` |
 
-`routes/index.js` — **no change** (the serve route rides on the already-mounted `/api/users`).
+Every controller that returns a user — `user.controller.js`, `auth.controller.js`, `admin/user.controller.js` — goes through `formatUser`, which is the single place `profilePictureUrl` is produced and `profilePictureKey` is dropped.
 
 ---
 
 ## Testing
 
-TDD at the service + util layer (Vitest + `mongodb-memory-server`), matching existing `tests/services/*.test.js` and `tests/utils/*` conventions (no supertest in the repo → no HTTP-level tests). One behavior per red→green step:
+Vitest + `mongodb-memory-server` at the service + util layer, matching existing `tests/services/*.test.js` and `tests/utils/*` conventions (no supertest in the repo → no HTTP-level tests):
 
 - `mimeType`: accepts valid JPEG/PNG/WEBP signatures; rejects SVG, GIF, and truncated/garbage input.
-- `user.service` `setProfilePicture`: writes a file and sets an absolute URL; trips the 2 MB cap and rolls back; replacing an existing picture deletes the old file; a remote/`null` previous `profilePicture` is left untouched on disk.
+- `user.model`: the key pattern defaults to `null`, accepts a well-formed key, and rejects both a key outside the `profile-pictures/` prefix and a traversal segment where the owner id belongs.
+- `user.service` `uploadProfilePicture`: stores the object and sets `profilePictureKey`; rejects a mismatched declaration, an oversized declaration, an oversized body, and a short body; replacing a picture deletes the previous object and leaves the new one; a failed commit removes the object it just wrote.
+- `user.service` `formatUser`: emits `profilePictureUrl` and never `profilePictureKey`; an unsignable key resolves to `null` instead of throwing.
 - `oauth.service`: a returning OAuth user's `name` **and** `profilePicture` are **not** overwritten on login.
-
----
-
-## As-built notes (deltas from design)
-
-A few details settled during implementation and review:
-
-- **Naming:** the service functions are `uploadProfilePicture` / `getProfilePicture`; the controller handlers are `uploadProfilePictureHandler` / `getProfilePictureHandler`.
-- **Serve existence check:** `getProfilePicture` opens the file with `fs.open()` and maps `ENOENT` → `PROFILE_PICTURE_NOT_FOUND` (404). Using `open` (rather than a separate `stat` + `open`) is one syscall and closes the check-then-use TOCTOU gap; any non-`ENOENT` `fs` error propagates to the global handler as a masked 500.
-- **Serve error forwarding:** the handler sets the cache / `nosniff` headers, then `res.sendFile(path, cb)`. On a *pre-stream* failure the callback strips `Cache-Control` (so a transient error isn't cached for a year) and calls `next(err)`. *Mid-stream* failures (headers already sent) are terminated centrally by `globalErrorHandler`, which now returns `next(err)` when `res.headersSent` — shipped as the `fix(error-middleware)` commit, also closing a pre-existing `getFileHandler` exposure.
-- **Verification:** dual-agent pre-commit review + `api-design` / `auth-and-security` / `error-handling` lens audits; 36 touched-file tests green (service + util + middleware layers; no supertest in the repo).
 
 ---
 
 ## Out of scope / follow-ups
 
-- `DELETE /api/users/profile-picture` (clear to `null`) — next PR.
+- `DELETE /api/users/profile-picture` (clear the picture back to `null`).
 - Image resizing / thumbnails — only if needed later.
-- Docs + frontend-api-reference sync — post-feature docs PR.
+- Reconciling stored keys against the bucket, so an object orphaned by a failed cleanup is eventually removed. `hardDeleteUser` removes a user's file objects but not their avatar object, so it produces one of these.
