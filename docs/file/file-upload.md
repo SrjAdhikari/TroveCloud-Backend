@@ -190,7 +190,7 @@ The consequence is deliberate: a client that cancels and then completes the `PUT
 
 `releaseExpiredFiles(userId)` closes out that user's `pending` rows whose `uploadExpiresAt` has passed, and it **decides by the object, not by the deadline**. A lapsed deadline says the client stopped talking to us; it does not say whether the bytes arrived. So each expired row is looked up in storage first, and only then is its fate decided:
 
-`classifyExpiredObjects` asks storage about every expired row and returns a map of three verdicts, and `settleExpiredReservations` acts on each:
+`classifyExpiredObjects` asks storage about every expired row and returns a map of three verdicts, and `promoteOrRefundExpiredFiles` acts on each:
 
 - **present** — the object exists and matches the row's `size` and `contentType` ⇒ the row is **promoted** to `ready`, clearing `uploadExpiresAt` and `cancelledAt`. The ancestor counters are left alone, because those bytes were counted at mint and the file is now real.
 - **absent** — the object is missing or does not match ⇒ the row is deleted, its bytes and file count subtracted from the ancestor chain, and the row returned so its object can be dropped afterwards.

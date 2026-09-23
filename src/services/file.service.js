@@ -831,7 +831,7 @@ const confirmUpload = async (fileId, userId) => {
 };
 
 /**
- * Cancels a pending upload, releasing its reserved bytes and shortening its upload window
+ * Cancels a pending upload by shortening its window and marking it cancelled; the sweep refunds the bytes and drops the object
  *
  * @param {string} fileId - The ID of the pending file
  * @param {string} userId - The owner's ID, for the ownership check
