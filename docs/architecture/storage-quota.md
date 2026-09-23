@@ -1,6 +1,6 @@
 # Storage Usage & Quota
 
-> **Status:** As-built (2026-09-10). Per-user storage quota + the usage-breakdown endpoint.
+> **Status:** As-built (2026-09-23). Per-user storage quota + the usage-breakdown endpoint.
 
 This document covers the per-user storage quota: where the limit lives, how usage is read, how the quota is enforced on upload, and the `GET /api/storage/usage` endpoint that powers the frontend's sidebar storage bar and settings storage tab.
 
@@ -55,7 +55,7 @@ This document covers the per-user storage quota: where the limit lives, how usag
 The quota is enforced by the shared `checkQuota` helper in `src/services/file.service.js`, called by both upload paths — `initiateUpload` (browser uploads, at the moment the bytes are reserved) and `uploadFileFromServer` (Drive import). See `../file/file-upload.md` for the full upload flow. The non-obvious parts:
 
 - **Checked inside the transaction that writes the counters.** On the browser path that is the transaction creating the `pending` row: the check runs against the *declared* size, before any bytes exist. On the server-side path the row is claimed at `size: 0` before streaming and the check runs in the second transaction, against the byte counter's total, before the row is promoted to `ready` — the real size isn't knowable any earlier. Either way the transaction reads the current root `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) when `usedBytes + uploadedBytes > storageLimit`.
-- **Abandoned reservations are refunded first.** `releaseExpiredFiles` runs at the head of both upload paths, in its own transaction that commits before the check opens, so bytes held by lapsed uploads are already back in the budget by the time the quota is evaluated. See `../file/file-upload.md`.
+- **Lapsed reservations are settled on rejection, not on arrival.** `releaseExpiredFiles` runs only when the quota check has already rejected with `STORAGE_LIMIT_EXCEEDED`. It decides each expired row by looking its object up in storage — refunding only the rows whose bytes are genuinely not there, promoting the rows whose bytes are, and skipping any row whose lookup failed — then commits in a transaction of its own, and the rejected transaction is retried exactly once, and only if rows were actually freed. An upload that fits pays nothing for the sweep; a genuinely full user pays one indexed query before the real error stands. See `../file/file-upload.md`.
 - **Concurrency-safe without a lock.** The same transaction also `$inc`s the root document (via `updateAncestorDirectoryStats`). Two simultaneous uploads therefore write-conflict on the root doc; `withTransaction` retries the loser, which re-reads the now-updated `size` and re-checks — so the cap holds even under concurrent uploads. (Details in `./transaction-patterns.md`.)
 - **Boundary:** the check uses a strict `>`, so an upload that exactly fills the quota is allowed, and a 0-byte upload at an exactly-full quota is allowed.
 
@@ -69,7 +69,9 @@ The quota is enforced by the shared `checkQuota` helper in `src/services/file.se
 | File whose extension isn't recognised, or has no extension | Counted under the `Other` category |
 | 0-byte file | Surfaces its category in the breakdown with `size: 0` |
 | Upload would exceed the quota | Rejected with `STORAGE_LIMIT_EXCEEDED` (400). The browser path never creates a row; the server-side path deletes its claim row and the object it already wrote |
-| Browser upload authorised but never completed | Its declared bytes stay reserved until `uploadExpiresAt`, then are refunded by the reclaim sweep at the head of the owner's next upload |
+| Browser upload authorised but never completed | Its declared bytes stay reserved until `uploadExpiresAt`. The next time one of the owner's uploads is rejected for quota, the sweep looks the object up: absent or mismatched, the row is deleted and the bytes refunded; present and matching, the row is promoted to `ready` and the bytes stay counted as a real file; lookup failed, the row is skipped and left to the next sweep |
+| Browser upload cancelled via `POST /api/files/:id/cancel` | The bytes stay counted and the object stays where it is — cancel only pulls `uploadExpiresAt` in to `createdAt` + the presign TTL + `ONE_MINUTE_MS` (about six minutes), so the sweep settles the row that much sooner. Cancel never refunds and never deletes; a presigned URL cannot be revoked, so an instant refund would be a storage bypass, and a `PUT` that completed anyway leaves bytes the sweep will promote rather than throw away |
+| Storage limit missing or non-numeric on the account | Rejected with `INVALID_STORAGE_LIMIT` (500) before the root-directory read. Deliberately not a quota rejection: that code triggers a sweep and a retry, and a configuration fault must not drive destructive cleanup |
 | Server-side claim that never promotes | Only a file slot is held, not bytes — the claim commits at `size: 0` and bytes are added when it flips to `ready`, so an abandoned one costs the quota nothing until the sweep removes the row |
 | Two concurrent uploads near the limit | One commits; the other write-conflicts on the root doc, retries against the fresh size, and is accepted or rejected correctly |
 | `used` vs `sum(breakdown)` | Both derive from the same files; in rare denormalization drift `used` (root size) is treated as authoritative |

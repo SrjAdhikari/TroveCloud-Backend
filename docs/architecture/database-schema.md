@@ -133,7 +133,8 @@ Source: `src/models/file.model.js`. Atlas mirror: `src/schemas/files.schema.js`.
 | `parentDirId`           | ObjectId | yes      | —       | The containing directory                        |
 | `userId`                | ObjectId | yes      | —       | Owning user (denormalized for cheap auth)       |
 | `status`                | String   | yes      | `ready` | `pending` \| `ready`. A `pending` row is an upload that has been authorised but not yet verified. Every read path filters on `ready`. |
-| `uploadExpiresAt`       | Date     | no       | —       | When a `pending` upload's reservation lapses. Unset when the upload is confirmed. Always later than the presigned URL's own expiry, so a slow but legitimate transfer is not reclaimed mid-flight. |
+| `uploadExpiresAt`       | Date     | no       | —       | When a `pending` upload's reservation lapses. Unset once the upload is settled, by confirm or by the sweep. Set at initiation to the presign TTL plus a transfer allowance, so it outlives the URL and a slow but legitimate transfer is not reclaimed mid-flight. Cancelling the upload shortens it to `createdAt` + the presign TTL + `ONE_MINUTE_MS`; the write is a `$min`, so it can only ever move earlier. The margin is load-bearing: `createdAt` is stamped before the URL is signed, and a PUT stays authorised while its body is still arriving, so the bare TTL would let a refund land while the URL can still be written to. |
+| `cancelledAt`           | Date     | no       | —       | Set when the client cancels the reservation, in the same atomic update as the shortened `uploadExpiresAt`. `confirmUpload`'s compare-and-set requires it to be absent, so a confirm arriving after a cancel is answered with `UPLOAD_CANCELLED` rather than promoting a row the client has given up on. It does not block the sweep: a cancelled row whose object is in storage is still promoted, and both this field and `uploadExpiresAt` are cleared then. No index — it is only ever read on a row already located by `_id`. |
 | `objectKey`             | String   | yes      | —       | `unique`, `select: false`. The R2 object key, shaped `files/<fileId>-<32 hex nonce><extension>`. Written once at initiation and read thereafter — never rebuilt. |
 | `createdAt`/`updatedAt` | Date     | —        | —       | Via `timestamps: true`                          |
 
@@ -141,7 +142,7 @@ Source: `src/models/file.model.js`. Atlas mirror: `src/schemas/files.schema.js`.
 
 - Compound `{ parentDirId: 1, userId: 1 }` — mirrors the Directory index; lets "list files in dir X owned by user Y" hit a single index.
 - Unique `{ objectKey: 1 }` — one document per stored object, enforced by the database rather than by convention.
-- Compound `{ userId: 1, status: 1, uploadExpiresAt: 1 }` — finds lapsed `pending` uploads without scanning the collection. `userId` leads because the only query that uses it is the reclaim sweep at the head of every upload, which asks for one user's expired reservations: leading with the owner bounds the scan to that user rather than to every lapsed reservation in the system.
+- Compound `{ userId: 1, status: 1, uploadExpiresAt: 1 }` — finds lapsed `pending` uploads without scanning the collection. `userId` leads because the query that uses it is the sweep that settles lapsed reservations, which asks for one user's expired rows: leading with the owner bounds the scan to that user rather than to every lapsed reservation in the system. The sweep runs only when an upload has been rejected for quota, so this is the index that keeps a rejection cheap. Cancelling an upload writes `uploadExpiresAt` backwards, which is what brings that row into the sweep's range early.
 
 **Name vs extension**
 

@@ -47,6 +47,9 @@ const fileSchema = new Schema(
 		uploadExpiresAt: {
 			type: Date,
 		},
+		cancelledAt: {
+			type: Date,
+		},
 		objectKey: {
 			type: String,
 			required: true,

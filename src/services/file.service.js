@@ -22,7 +22,11 @@ import {
 } from "../lib/r2.js";
 import createByteCounter from "../utils/byteCounter.js";
 import { mimeFromExtension, isInlineSafe } from "../utils/mimeType.js";
-import { FIFTEEN_MINUTES_MS, ONE_HOUR_MS } from "../utils/date.js";
+import {
+	FIFTEEN_MINUTES_MS,
+	ONE_HOUR_MS,
+	ONE_MINUTE_MS,
+} from "../utils/date.js";
 
 import envConfig from "../constants/env.js";
 import httpStatus from "../constants/httpStatus.js";
@@ -36,11 +40,13 @@ const {
 	FILE_UPLOAD_FAILED,
 	FILE_TOO_LARGE,
 	STORAGE_LIMIT_EXCEEDED,
+	INVALID_STORAGE_LIMIT,
 	INVALID_INPUT,
 	UPLOAD_INCOMPLETE,
 	UPLOAD_OBJECT_MISMATCH,
 	UPLOAD_ALREADY_CONFIRMED,
 	UPLOAD_IN_PROGRESS,
+	UPLOAD_CANCELLED,
 } = appErrorCode;
 
 const { MAX_FILE_UPLOAD_SIZE } = envConfig;
@@ -55,11 +61,20 @@ const isUploadStillLive = (file) =>
 	file.status !== "ready" &&
 	(!file.uploadExpiresAt || file.uploadExpiresAt > new Date());
 
+/** Calculates the expiry time for a pending upload based on the declared size and minimum upload speed */
+const calculateUploadExpiry = (declaredSize) => {
+	const transferMs = (declaredSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1000;
+
+	return new Date(
+		Date.now() +
+			UPLOAD_URL_TTL_SECONDS * 1000 +
+			Math.min(ONE_HOUR_MS, Math.max(FIFTEEN_MINUTES_MS, transferMs)),
+	);
+};
+
 /**
- * Releases the reserved bytes for a pending upload, and deletes its row if it
- * is still pending. This is used to refund quota when an upload fails or is cancelled.
- *
- * @returns {Promise<boolean>} Whether the row was actually deleted
+ * Releases the reserved bytes for a pending upload, and deletes its row if it is still pending.
+ * Returns true if the row was deleted, false if it was already gone or not pending.
  */
 const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
 	const mongooseSession = await mongoose.startSession();
@@ -94,59 +109,126 @@ const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
 	return released;
 };
 
-/**
- * Deletes upload rows whose window has closed and refunds their bytes.
- * Returns the rows it deleted so their objects can be dropped afterwards.
- */
-const releaseExpiredFiles = async (userId) => {
-	const mongooseSession = await mongoose.startSession();
+const matchSizeAndType = (fileMetadata, file) =>
+	Boolean(fileMetadata) &&
+	fileMetadata.size === file.size &&
+	fileMetadata.contentType === file.contentType;
+
+const findExpiredFiles = async (userId, excludedFileId) => {
+	const filter = {
+		userId,
+		status: "pending",
+		uploadExpiresAt: { $lt: new Date() },
+	};
+
+	if (excludedFileId) filter._id = { $ne: excludedFileId };
+
+	return File.find(filter, "parentDirId size objectKey contentType")
+		.limit(MAX_EXPIRED_FILES_PER_SWEEP)
+		.lean();
+};
+
+/** Classifies expired files by checking if their objects exist and match the expected size and type */
+const classifyExpiredObjects = async (files) => {
+	const outcomes = await Promise.all(
+		files.map(async (file) => {
+			try {
+				const fileMetadata = await getObjectMetadata(file.objectKey);
+
+				return [
+					String(file._id),
+					matchSizeAndType(fileMetadata, file) ? "present" : "absent",
+				];
+			} catch (error) {
+				console.warn(
+					`Failed to look up the object for file ${file._id}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+				);
+
+				return [String(file._id), "unknown"];
+			}
+		}),
+	);
+
+	return new Map(outcomes);
+};
+
+/** Promotes or refunds expired files based on their classification */
+const promoteOrRefundExpiredFiles = async (
+	expiredFiles,
+	objectOutcomes,
+	userId,
+	session,
+) => {
+	const deletedFiles = [];
+
+	for (const file of expiredFiles) {
+		const outcome = objectOutcomes.get(String(file._id)) ?? "unknown";
+
+		if (outcome === "present") {
+			await File.updateOne(
+				{ _id: file._id, userId, status: "pending" },
+				{
+					$set: { status: "ready" },
+					$unset: { uploadExpiresAt: "", cancelledAt: "" },
+				},
+				{ session },
+			);
+			continue;
+		}
+
+		if (outcome === "unknown") continue;
+
+		const { deletedCount } = await File.deleteOne(
+			{ _id: file._id, userId, status: "pending" },
+			{ session },
+		);
+
+		if (deletedCount !== 1) continue;
+
+		await updateAncestorDirectoryStats(
+			file.parentDirId,
+			{ bytes: -file.size, files: -1 },
+			session,
+		);
+		deletedFiles.push(file);
+	}
+
+	return deletedFiles;
+};
+
+/** Releases expired files for a user, excluding a specific file if provided */
+const releaseExpiredFiles = async (userId, excludedFileId) => {
 	let deletedFiles = [];
 
 	try {
-		await mongooseSession.withTransaction(async () => {
-			deletedFiles = [];
+		const expiredFiles = await findExpiredFiles(userId, excludedFileId);
+		if (expiredFiles.length === 0) return deletedFiles;
 
-			const expiredFiles = await File.find(
-				{ userId, status: "pending", uploadExpiresAt: { $lt: new Date() } },
-				"parentDirId size objectKey",
-				{ session: mongooseSession },
-			)
-				.limit(MAX_EXPIRED_FILES_PER_SWEEP)
-				.lean();
+		const objectOutcomes = await classifyExpiredObjects(expiredFiles);
+		const mongooseSession = await mongoose.startSession();
 
-			for (const file of expiredFiles) {
-				const { deletedCount } = await File.deleteOne(
-					{ _id: file._id, userId, status: "pending" },
-					{ session: mongooseSession },
-				);
-
-				if (deletedCount !== 1) continue;
-
-				await updateAncestorDirectoryStats(
-					file.parentDirId,
-					{ bytes: -file.size, files: -1 },
+		try {
+			await mongooseSession.withTransaction(async () => {
+				deletedFiles = await promoteOrRefundExpiredFiles(
+					expiredFiles,
+					objectOutcomes,
+					userId,
 					mongooseSession,
 				);
-				deletedFiles.push(file);
-			}
-		});
+			});
+		} finally {
+			await mongooseSession.endSession();
+		}
 	} catch (error) {
 		// An aborted sweep rolls the rows back, so a stale list would drop objects still named by live rows.
 		deletedFiles = [];
 		console.warn(
 			`Failed to release expired uploads for user ${userId}: ${error.name} ${error.code ?? ""}`.trim(),
 		);
-	} finally {
-		await mongooseSession.endSession();
 	}
 
 	return deletedFiles;
 };
-
-const matchSizeAndType = (fileMetadata, file) =>
-	Boolean(fileMetadata) &&
-	fileMetadata.size === file.size &&
-	fileMetadata.contentType === file.contentType;
 
 const removeObject = async (objectKey, fileId) => {
 	try {
@@ -158,17 +240,33 @@ const removeObject = async (objectKey, fileId) => {
 	}
 };
 
+/** Rolls back a failed upload by releasing its reserved bytes and deleting its object if no row names it */
+const rollbackFailedUpload = async (fileId, parentDirId, objectKey) => {
+	// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
+	const released = await releaseReservedBytes(fileId, parentDirId, 0);
+
+	// An absent row proves nothing names this key; only a promoted row keeps its object.
+	if (released || !(await File.exists({ _id: fileId }))) {
+		await removeObject(objectKey, fileId);
+	}
+};
+
 const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
+	if (!isValidStorageLimit(totalStorageLimit)) {
+		throw new AppError(
+			"Storage limit is not configured",
+			INTERNAL_SERVER_ERROR,
+			INVALID_STORAGE_LIMIT,
+		);
+	}
+
 	const rootDir = await Directory.findOne(
 		{ userId, parentDirId: null },
 		"size",
 		{ session },
-	);
+	).lean();
 
-	if (
-		!isValidStorageLimit(totalStorageLimit) ||
-		(rootDir?.size ?? 0) + bytes > totalStorageLimit
-	) {
+	if ((rootDir?.size ?? 0) + bytes > totalStorageLimit) {
 		throw new AppError(
 			"Storage limit exceeded",
 			BAD_REQUEST,
@@ -178,8 +276,40 @@ const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 };
 
 /**
+ * Attempts to reserve quota for a new file, and reclaims expired files if the attempt fails. 
+ * If that frees up enough space, it is retried once. A second failure propagates unchanged.
+ */
+const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
+	try {
+		await reserve();
+	} catch (error) {
+		if (!(error instanceof AppError) || error.code !== STORAGE_LIMIT_EXCEEDED) {
+			throw error;
+		}
+
+		const deletedFiles = await releaseExpiredFiles(userId, excludedFileId);
+		if (deletedFiles.length === 0) throw error;
+
+		await Promise.allSettled(
+			deletedFiles.map((file) => removeObject(file.objectKey, file._id)),
+		);
+
+		// Exactly one retry: a second rejection propagates unchanged.
+		await reserve();
+	}
+};
+
+/**
  * Verifies the parent directory belongs to the user and creates the new
  * file's identity. Shared by both upload paths so they cannot drift apart.
+ *
+ * @param {string} parentDirId - The ID of the target parent directory
+ * @param {string} userId - The owner's ID, for the ownership check
+ * @param {string} fileName - The sanitized filename provided by the caller
+ *
+ * @returns {Promise<{parentDir: Object, extension: string,
+ *   fileId: import("mongoose").Types.ObjectId, objectKey: string, contentType: string}>}
+ * @throws {AppError} Bad extension, or a parent the user does not own
  */
 const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
 	const extension = path.extname(fileName).toLowerCase();
@@ -284,6 +414,56 @@ const createDownloadUrl = async (fileId, userId, options = {}) => {
 };
 
 /**
+ * Writes the 0-byte pending row that claims the key before any bytes are read,
+ * so no object can exist without a row naming it. Only the file count is
+ * reserved here; the streamed bytes are counted once they are known.
+ */
+const createUploadClaim = async (
+	{ parentDir, extension, fileId, objectKey, contentType },
+	userId,
+	fileName,
+) => {
+	const session = await mongoose.startSession();
+
+	try {
+		await session.withTransaction(async () => {
+			await File.create(
+				[
+					{
+						_id: fileId,
+						name: fileName,
+						extension,
+						contentType,
+						size: 0,
+						parentDirId: parentDir._id,
+						userId,
+						status: "pending",
+						uploadExpiresAt: new Date(Date.now() + ONE_HOUR_MS),
+						objectKey,
+					},
+				],
+				{ session },
+			);
+
+			await updateAncestorDirectoryStats(
+				parentDir._id,
+				{ bytes: 0, files: 1 },
+				session,
+			);
+		});
+	} catch (error) {
+		if (error instanceof AppError) throw error;
+		throw new AppError(
+			"Failed to upload file",
+			INTERNAL_SERVER_ERROR,
+			FILE_UPLOAD_FAILED,
+		);
+	} finally {
+		await session.endSession();
+	}
+};
+
+/**
  * Uploads a file from a server-held stream — Drive import and the cutover
  * script, where the bytes reach the server first so a presigned PUT is not an
  * option. Returns the raw document, key included: every caller is server-side.
@@ -307,67 +487,18 @@ const uploadFileFromServer = async (
 	totalStorageLimit,
 	perFileCap = MAX_FILE_UPLOAD_SIZE,
 ) => {
-	const { parentDir, extension, fileId, objectKey, contentType } =
-		await validateAndBuildNewFile(parentDirId, userId, fileName);
+	const newFile = await validateAndBuildNewFile(parentDirId, userId, fileName);
+	const { parentDir, fileId, objectKey, contentType } = newFile;
 
-	const deletedFiles = await releaseExpiredFiles(userId);
-
-	await Promise.allSettled(
-		deletedFiles.map((file) => removeObject(file.objectKey, file._id)),
-	);
-
-	const session = await mongoose.startSession();
-
-	try {
-		await session.withTransaction(async () => {
-			await File.create(
-				[
-					{
-						_id: fileId,
-						name: fileName,
-						extension,
-						contentType,
-						size: 0,
-						parentDirId: parentDir._id,
-						userId,
-						status: "pending",
-						uploadExpiresAt: new Date(Date.now() + ONE_HOUR_MS),
-						objectKey,
-					},
-				],
-				{ session: session },
-			);
-
-			await updateAncestorDirectoryStats(
-				parentDir._id,
-				{ bytes: 0, files: 1 },
-				session,
-			);
-		});
-	} catch (error) {
-		if (error instanceof AppError) throw error;
-		throw new AppError(
-			"Failed to upload file",
-			INTERNAL_SERVER_ERROR,
-			FILE_UPLOAD_FAILED,
-		);
-	} finally {
-		await session.endSession();
-	}
+	await createUploadClaim(newFile, userId, fileName);
 
 	const byteCounter = createByteCounter(perFileCap);
 	const countedStream = pipeline(fileStream, byteCounter.stream, () => {});
 
 	try {
 		await putObject(objectKey, countedStream, { contentType });
-	} catch (error) {
-		// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
-		const released = await releaseReservedBytes(fileId, parentDir._id, 0);
-
-		// An absent row proves nothing names this key; only a promoted row keeps its object.
-		if (released || !(await File.exists({ _id: fileId }))) {
-			await removeObject(objectKey, fileId);
-		}
+	} catch {
+		await rollbackFailedUpload(fileId, parentDir._id, objectKey);
 
 		if (byteCounter.state.tripped) {
 			throw new AppError(
@@ -385,46 +516,48 @@ const uploadFileFromServer = async (
 	}
 
 	const bytes = byteCounter.state.bytes;
-	const mongooseSession = await mongoose.startSession();
 	let file;
 
-	try {
-		await mongooseSession.withTransaction(async () => {
-			await checkQuota(userId, bytes, totalStorageLimit, mongooseSession);
+	const reserveQuota = async () => {
+		const mongooseSession = await mongoose.startSession();
+		try {
+			await mongooseSession.withTransaction(async () => {
+				await checkQuota(userId, bytes, totalStorageLimit, mongooseSession);
 
-			file = await File.findOneAndUpdate(
-				{ _id: fileId, status: "pending" },
-				{
-					$set: { status: "ready", size: bytes },
-					$unset: { uploadExpiresAt: "" },
-				},
-				{ new: true, session: mongooseSession },
-			)
-				.select("+objectKey")
-				.lean();
+				file = await File.findOneAndUpdate(
+					{ _id: fileId, status: "pending" },
+					{
+						$set: { status: "ready", size: bytes },
+						$unset: { uploadExpiresAt: "" },
+					},
+					{ new: true, session: mongooseSession },
+				)
+					.select("+objectKey")
+					.lean();
 
-			if (!file) {
-				throw new AppError(
-					"Failed to upload file",
-					INTERNAL_SERVER_ERROR,
-					FILE_UPLOAD_FAILED,
+				if (!file) {
+					throw new AppError(
+						"Failed to upload file",
+						INTERNAL_SERVER_ERROR,
+						FILE_UPLOAD_FAILED,
+					);
+				}
+
+				await updateAncestorDirectoryStats(
+					parentDir._id,
+					{ bytes },
+					mongooseSession,
 				);
-			}
-
-			await updateAncestorDirectoryStats(
-				parentDir._id,
-				{ bytes },
-				mongooseSession,
-			);
-		});
-	} catch (error) {
-		// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
-		const released = await releaseReservedBytes(fileId, parentDir._id, 0);
-
-		// An absent row proves nothing names this key; only a promoted row keeps its object.
-		if (released || !(await File.exists({ _id: fileId }))) {
-			await removeObject(objectKey, fileId);
+			});
+		} finally {
+			await mongooseSession.endSession();
 		}
+	};
+
+	try {
+		await reserveQuotaWithReclaim(userId, reserveQuota, fileId);
+	} catch (error) {
+		await rollbackFailedUpload(fileId, parentDir._id, objectKey);
 
 		if (error instanceof AppError) throw error;
 		throw new AppError(
@@ -432,8 +565,6 @@ const uploadFileFromServer = async (
 			INTERNAL_SERVER_ERROR,
 			FILE_UPLOAD_FAILED,
 		);
-	} finally {
-		await mongooseSession.endSession();
 	}
 
 	return file;
@@ -552,57 +683,49 @@ const initiateUpload = async (
 	const { parentDir, extension, fileId, objectKey, contentType } =
 		await validateAndBuildNewFile(parentDirId, userId, fileName);
 
-	const uploadDurationMs = (declaredSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1000;
+	const uploadExpiresAt = calculateUploadExpiry(declaredSize);
 
-	const uploadExpiresAt = new Date(
-		Date.now() +
-			UPLOAD_URL_TTL_SECONDS * 1000 +
-			Math.min(ONE_HOUR_MS, Math.max(FIFTEEN_MINUTES_MS, uploadDurationMs)),
-	);
+	const reserveQuota = async () => {
+		const mongooseSession = await mongoose.startSession();
+		try {
+			await mongooseSession.withTransaction(async () => {
+				await checkQuota(
+					userId,
+					declaredSize,
+					totalStorageLimit,
+					mongooseSession,
+				);
 
-	const deletedFiles = await releaseExpiredFiles(userId);
+				await File.create(
+					[
+						{
+							_id: fileId,
+							name: fileName,
+							extension,
+							contentType,
+							size: declaredSize,
+							parentDirId: parentDir._id,
+							userId,
+							status: "pending",
+							uploadExpiresAt,
+							objectKey,
+						},
+					],
+					{ session: mongooseSession },
+				);
 
-	await Promise.allSettled(
-		deletedFiles.map((file) => removeObject(file.objectKey, file._id)),
-	);
+				await updateAncestorDirectoryStats(
+					parentDir._id,
+					{ bytes: declaredSize, files: 1 },
+					mongooseSession,
+				);
+			});
+		} finally {
+			await mongooseSession.endSession();
+		}
+	};
 
-	const mongooseSession = await mongoose.startSession();
-	try {
-		await mongooseSession.withTransaction(async () => {
-			await checkQuota(
-				userId,
-				declaredSize,
-				totalStorageLimit,
-				mongooseSession,
-			);
-
-			await File.create(
-				[
-					{
-						_id: fileId,
-						name: fileName,
-						extension,
-						contentType,
-						size: declaredSize,
-						parentDirId: parentDir._id,
-						userId,
-						status: "pending",
-						uploadExpiresAt,
-						objectKey,
-					},
-				],
-				{ session: mongooseSession },
-			);
-
-			await updateAncestorDirectoryStats(
-				parentDir._id,
-				{ bytes: declaredSize, files: 1 },
-				mongooseSession,
-			);
-		});
-	} finally {
-		await mongooseSession.endSession();
-	}
+	await reserveQuotaWithReclaim(userId, reserveQuota);
 
 	let uploadUrl;
 	try {
@@ -610,7 +733,7 @@ const initiateUpload = async (
 			contentType,
 			contentLength: declaredSize,
 		});
-	} catch (error) {
+	} catch {
 		await releaseReservedBytes(fileId, parentDir._id, declaredSize);
 
 		throw new AppError(
@@ -638,7 +761,7 @@ const initiateUpload = async (
  * @param {string} userId - The owner's ID, for the ownership check
  *
  * @returns {Promise<Object>} The ready file document
- * @throws {AppError} FILE_NOT_FOUND | UPLOAD_INCOMPLETE | UPLOAD_OBJECT_MISMATCH | UPLOAD_ALREADY_CONFIRMED
+ * @throws {AppError} FILE_NOT_FOUND | UPLOAD_INCOMPLETE | UPLOAD_OBJECT_MISMATCH | UPLOAD_ALREADY_CONFIRMED | UPLOAD_CANCELLED
  */
 const confirmUpload = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId })
@@ -681,7 +804,7 @@ const confirmUpload = async (fileId, userId) => {
 	}
 
 	const updatedFile = await File.findOneAndUpdate(
-		{ _id: file._id, status: "pending" },
+		{ _id: file._id, status: "pending", cancelledAt: { $exists: false } },
 		{ $set: { status: "ready" }, $unset: { uploadExpiresAt: "" } },
 		{ new: true },
 	).lean();
@@ -693,10 +816,67 @@ const confirmUpload = async (fileId, userId) => {
 			throw new AppError("File not found", NOT_FOUND, FILE_NOT_FOUND);
 		}
 
+		if (existingFile.cancelledAt) {
+			throw new AppError(
+				"This upload was cancelled. Please start a new upload.",
+				CONFLICT,
+				UPLOAD_CANCELLED,
+			);
+		}
+
 		return existingFile;
 	}
 
 	return updatedFile;
+};
+
+/**
+ * Cancels a pending upload by shortening its window and marking it cancelled; the sweep refunds the bytes and drops the object
+ *
+ * @param {string} fileId - The ID of the pending file
+ * @param {string} userId - The owner's ID, for the ownership check
+ *
+ * @returns {Promise<Object>} The cancelled file document
+ * @throws {AppError} FILE_NOT_FOUND | UPLOAD_ALREADY_CONFIRMED
+ */
+const cancelUpload = async (fileId, userId) => {
+	const file = await File.findOne({ _id: fileId, userId }).lean();
+
+	if (!file) {
+		throw new AppError("File not found", NOT_FOUND, FILE_NOT_FOUND);
+	}
+
+	if (file.status !== "pending") {
+		throw new AppError(
+			"This upload has already been completed.",
+			BAD_REQUEST,
+			UPLOAD_ALREADY_CONFIRMED,
+		);
+	}
+
+	const shortenedExpiry = new Date(
+		file.createdAt.getTime() + UPLOAD_URL_TTL_SECONDS * 1000 + ONE_MINUTE_MS,
+	);
+
+	// $min only ever moves the deadline earlier, so a repeated or late cancel cannot extend the file's window.
+	const cancelledFile = await File.findOneAndUpdate(
+		{ _id: file._id, userId, status: "pending" },
+		{
+			$min: { uploadExpiresAt: shortenedExpiry },
+			$set: { cancelledAt: new Date() },
+		},
+		{ new: true },
+	).lean();
+
+	if (!cancelledFile) {
+		throw new AppError(
+			"This upload has already been completed.",
+			BAD_REQUEST,
+			UPLOAD_ALREADY_CONFIRMED,
+		);
+	}
+
+	return cancelledFile;
 };
 
 export {
@@ -709,4 +889,5 @@ export {
 	deleteFile,
 	initiateUpload,
 	confirmUpload,
+	cancelUpload,
 };

@@ -56,6 +56,11 @@ const fileSchema = {
 				bsonType: "date",
 				description: "When the pending upload is given up on; absent once ready",
 			},
+			cancelledAt: {
+				bsonType: "date",
+				description:
+					"When the client gave the upload up; blocks a late confirm, absent once ready",
+			},
 			userId: {
 				bsonType: "objectId",
 				description:
