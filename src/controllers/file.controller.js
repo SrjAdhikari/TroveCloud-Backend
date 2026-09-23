@@ -5,6 +5,7 @@ import {
 	createDownloadUrl,
 	initiateUpload,
 	confirmUpload,
+	cancelUpload,
 	updateFile,
 	deleteFile,
 } from "../services/file.service.js";
@@ -78,6 +79,19 @@ const confirmUploadHandler = async (req, res) => {
 	});
 };
 
+const cancelUploadHandler = async (req, res) => {
+	const user = req.user;
+	const fileId = req.params.id;
+
+	const cancelledFile = await cancelUpload(fileId, user._id);
+
+	return res.status(OK).json({
+		success: true,
+		message: "Upload cancelled successfully",
+		data: cancelledFile,
+	});
+};
+
 const updateFileHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
@@ -111,6 +125,7 @@ export {
 	createDownloadUrlHandler,
 	initiateUploadHandler,
 	confirmUploadHandler,
+	cancelUploadHandler,
 	updateFileHandler,
 	deleteFileHandler,
 };

@@ -11,6 +11,7 @@ import {
 	createDownloadUrlHandler,
 	initiateUploadHandler,
 	confirmUploadHandler,
+	cancelUploadHandler,
 	updateFileHandler,
 	deleteFileHandler,
 } from "../controllers/file.controller.js";
@@ -57,6 +58,12 @@ fileRouter.post(
  * @route POST /api/files/{:id}/confirm
  */
 fileRouter.post("/:id/confirm", mutationLimiter, confirmUploadHandler);
+
+/**
+ * Cancel a pending upload
+ * @route POST /api/files/{:id}/cancel
+ */
+fileRouter.post("/:id/cancel", mutationLimiter, cancelUploadHandler);
 
 /**
  * Mint a signed download URL for a file
