@@ -42,7 +42,7 @@ Please navigate to the specific domain you need below:
 ### 📂 [File](./file)
 
 - [`file-retrieval.md`](./file/file-retrieval.md) - Retrieve file metadata and mint signed download URLs
-- [`file-upload.md`](./file/file-upload.md) - Browser-direct upload to object storage, with quota reservation
+- [`file-upload.md`](./file/file-upload.md) - Browser-direct upload to object storage, with quota reservation, cancellation, and reclaim
 - [`file-update.md`](./file/file-update.md) - Rename a file (atomic single-query update)
 - [`file-deletion.md`](./file/file-deletion.md) - Delete a file's DB record and its stored object
 
