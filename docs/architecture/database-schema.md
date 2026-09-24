@@ -142,7 +142,7 @@ Source: `src/models/file.model.js`. Atlas mirror: `src/schemas/files.schema.js`.
 
 - Compound `{ parentDirId: 1, userId: 1 }` — mirrors the Directory index; lets "list files in dir X owned by user Y" hit a single index.
 - Unique `{ objectKey: 1 }` — one document per stored object, enforced by the database rather than by convention.
-- Compound `{ userId: 1, status: 1, uploadExpiresAt: 1 }` — finds lapsed `pending` uploads without scanning the collection. `userId` leads because the query that uses it is the sweep that settles lapsed reservations, which asks for one user's expired rows: leading with the owner bounds the scan to that user rather than to every lapsed reservation in the system. The sweep runs only when an upload has been rejected for quota, so this is the index that keeps a rejection cheap. Cancelling an upload writes `uploadExpiresAt` backwards, which is what brings that row into the sweep's range early.
+- Compound `{ userId: 1, status: 1, uploadExpiresAt: 1 }` — finds lapsed `pending` uploads without scanning the collection. `userId` leads because the query that uses it is the sweep that settles lapsed reservations, which asks for one user's expired rows: leading with the owner bounds the scan to that user rather than to every lapsed reservation in the system. The sweep runs when an upload has been rejected for quota and on every storage-usage read, so this is the index that keeps both cheap. Cancelling an upload writes `uploadExpiresAt` backwards, which is what brings that row into the sweep's range early.
 
 **Name vs extension**
 
