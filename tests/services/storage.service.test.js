@@ -1,12 +1,23 @@
 import { describe, it, expect } from "vitest";
+import { Readable } from "node:stream";
 
 import { getStorageUsage } from "../../src/services/storage.service.js";
+import { putObject } from "../../src/lib/r2.js";
+import File from "../../src/models/file.model.js";
+import Directory from "../../src/models/directory.model.js";
+import { ONE_MINUTE_MS } from "../../src/utils/date.js";
 
 import {
 	createTestUser,
 	createTestDirectory,
 	createTestFile,
 } from "../factories.js";
+
+const expire = async (fileId) =>
+	File.updateOne(
+		{ _id: fileId },
+		{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+	);
 
 describe("getStorageUsage", () => {
 	it("returns zero usage and the default quota for a user with no files", async () => {
@@ -113,5 +124,75 @@ describe("getStorageUsage", () => {
 		const usage = await getStorageUsage(user._id, user.storageLimit);
 
 		expect(usage.total).toBe(5000);
+	});
+
+	it("refunds an expired reservation with no object before reading `used`", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id, {
+			size: 1500,
+			fileCount: 2,
+		});
+		await createTestFile(user._id, root._id, { extension: ".pdf", size: 1000 });
+		const lapsed = await createTestFile(user._id, root._id, {
+			extension: ".jpg",
+			size: 500,
+			status: "pending",
+		});
+		await expire(lapsed._id);
+
+		const usage = await getStorageUsage(user._id, user.storageLimit);
+
+		expect(usage.used).toBe(1000);
+		expect(await File.exists({ _id: lapsed._id })).toBeNull();
+		expect((await Directory.findById(root._id)).fileCount).toBe(1);
+	});
+
+	it("promotes an expired reservation whose object landed before reading the breakdown", async () => {
+		const user = await createTestUser();
+		const body = "landed bytes"; // 12
+		const root = await createTestDirectory(user._id, {
+			size: body.length,
+			fileCount: 1,
+		});
+		const landed = await createTestFile(user._id, root._id, {
+			extension: ".jpg",
+			size: body.length,
+			status: "pending",
+		});
+		await putObject(landed.objectKey, Readable.from([body]), {
+			contentType: landed.contentType,
+		});
+		await expire(landed._id);
+
+		const usage = await getStorageUsage(user._id, user.storageLimit);
+
+		// Its bytes were counted at mint, so promotion leaves `used` alone.
+		expect(usage.used).toBe(body.length);
+		expect((await File.findById(landed._id).lean()).status).toBe("ready");
+		expect(usage.breakdown).toEqual([
+			{ category: "Images", size: body.length, icon: "image" },
+		]);
+	});
+
+	it("keeps counting a reservation that has not expired yet", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id, {
+			size: 500,
+			fileCount: 1,
+		});
+		const live = await createTestFile(user._id, root._id, {
+			extension: ".jpg",
+			size: 500,
+			status: "pending",
+		});
+		const uploadExpiresAt = new Date(Date.now() + ONE_MINUTE_MS);
+		await File.updateOne({ _id: live._id }, { uploadExpiresAt });
+
+		const usage = await getStorageUsage(user._id, user.storageLimit);
+
+		expect(usage.used).toBe(500);
+		const row = await File.findById(live._id).lean();
+		expect(row.status).toBe("pending");
+		expect(row.uploadExpiresAt.getTime()).toBe(uploadExpiresAt.getTime());
 	});
 });

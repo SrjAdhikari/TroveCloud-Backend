@@ -1573,7 +1573,7 @@ describe("initiateUpload sweeps expired files only when quota rejects", () => {
 			fileCount: overflow + 1,
 		});
 
-		// The leftovers only drain on a mint that is itself rejected for quota.
+		// On the upload path, the leftovers only drain on a mint that is itself rejected for quota.
 		await initiateUpload(root._id, user._id, "second.txt", 250, user.storageLimit);
 
 		expect(await File.countDocuments({ _id: { $in: stale } })).toBe(0);
@@ -1952,7 +1952,7 @@ describe("uploadFileFromServer releases expired files", () => {
 		await expire(abandoned.fileId);
 
 		// An import-only account never mints, so its abandoned claims would pile
-		// up forever; the promotion's quota check is its only sweep trigger.
+		// up forever; besides usage reads, the promotion's quota check is its only sweep trigger.
 		const file = await upload(
 			root._id,
 			user._id,
