@@ -275,8 +275,19 @@ const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 	}
 };
 
+/** Settles a user's expired reservations and removes the objects of the refunded rows */
+const settleExpiredPendingFiles = async (userId, excludedFileId) => {
+	const deletedFiles = await releaseExpiredFiles(userId, excludedFileId);
+
+	await Promise.allSettled(
+		deletedFiles.map((file) => removeObject(file.objectKey, file._id)),
+	);
+
+	return deletedFiles;
+};
+
 /**
- * Attempts to reserve quota for a new file, and reclaims expired files if the attempt fails. 
+ * Attempts to reserve quota for a new file, and reclaims expired files if the attempt fails.
  * If that frees up enough space, it is retried once. A second failure propagates unchanged.
  */
 const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
@@ -287,12 +298,8 @@ const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
 			throw error;
 		}
 
-		const deletedFiles = await releaseExpiredFiles(userId, excludedFileId);
+		const deletedFiles = await settleExpiredPendingFiles(userId, excludedFileId);
 		if (deletedFiles.length === 0) throw error;
-
-		await Promise.allSettled(
-			deletedFiles.map((file) => removeObject(file.objectKey, file._id)),
-		);
 
 		// Exactly one retry: a second rejection propagates unchanged.
 		await reserve();
@@ -890,4 +897,5 @@ export {
 	initiateUpload,
 	confirmUpload,
 	cancelUpload,
+	settleExpiredPendingFiles,
 };

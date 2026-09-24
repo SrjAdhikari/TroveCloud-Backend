@@ -2,6 +2,7 @@
 
 import Directory from "../models/directory.model.js";
 import File from "../models/file.model.js";
+import { settleExpiredPendingFiles } from "./file.service.js";
 
 import {
 	categorizeExtension,
@@ -13,13 +14,16 @@ import {
  * bytes used, and a per-category breakdown.
  *
  * `usedBytes` is read from the denormalized root-directory size
- * so the storage bar never disagrees with the quota check.
+ * so the storage bar never disagrees with the quota check. Expired
+ * reservations are swept first so lapsed and cancelled uploads settle.
  *
  * @param {string} userId - The authenticated user's id.
  * @param {number} totalStorageLimit - The user's total storage limit in bytes.
  * @returns {Promise<{used: number, total: number, breakdown: Array<{category: string, size: number, icon: string}>}>}
  */
 const getStorageUsage = async (userId, totalStorageLimit) => {
+	await settleExpiredPendingFiles(userId);
+
 	const rootDir = await Directory.findOne({ userId, parentDirId: null })
 		.select("size")
 		.lean();
