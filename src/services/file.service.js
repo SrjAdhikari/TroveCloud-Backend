@@ -54,6 +54,9 @@ const { MAX_FILE_UPLOAD_SIZE } = envConfig;
 const MIN_UPLOAD_BYTES_PER_SECOND = 16_000;
 const MAX_EXPIRED_FILES_PER_SWEEP = 25;
 
+// The maximum time a pending upload can be reserved against the user's quota.
+const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + ONE_HOUR_MS;
+
 const isValidStorageLimit = (limit) =>
 	Number.isFinite(limit) || limit === Number.POSITIVE_INFINITY;
 
@@ -889,6 +892,7 @@ const cancelUpload = async (fileId, userId) => {
 export {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_EXPIRED_FILES_PER_SWEEP,
+	MAX_UPLOAD_RESERVATION_MS,
 	getFile,
 	createDownloadUrl,
 	uploadFileFromServer,
