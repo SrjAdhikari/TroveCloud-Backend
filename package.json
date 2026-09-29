@@ -12,7 +12,8 @@
 		"start": "node server.js",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"seed:superadmin": "node scripts/seed-superadmin.js"
+		"seed:superadmin": "node scripts/seed-superadmin.js",
+		"reconcile:orphans": "node scripts/reconcile-orphans.js"
 	},
 	"repository": {
 		"type": "git",

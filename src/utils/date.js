@@ -4,6 +4,7 @@ export const ONE_MINUTE_MS = 60 * 1000;
 export const TEN_MINUTES_MS = 10 * 60 * 1000;
 export const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 export const ONE_HOUR_MS = 60 * 60 * 1000;
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 export const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 export const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
