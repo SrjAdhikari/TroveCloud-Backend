@@ -6,6 +6,7 @@ import {
 	GetObjectCommand,
 	HeadObjectCommand,
 	DeleteObjectCommand,
+	DeleteObjectsCommand,
 	ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
@@ -57,6 +58,7 @@ const UPLOAD_URL_TTL_SECONDS = FIVE_MINUTES_SECONDS;
 const DOWNLOAD_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
 const PROFILE_PICTURE_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
 const SIGNING_WINDOW_MS = FIFTEEN_MINUTES_MS;
+const MAX_DELETE_KEYS_PER_REQUEST = 1000;
 
 const quantizedSigningDate = (ttlSeconds) => {
 	const window = Math.min(SIGNING_WINDOW_MS, (ttlSeconds * 1000) / 4);
@@ -244,6 +246,51 @@ const deleteObject = async (key) => {
 	);
 };
 
+const deleteObjects = async (keys) => {
+	if (!Array.isArray(keys)) {
+		throw new AppError(
+			"Object keys must be an array",
+			BAD_REQUEST,
+			INVALID_INPUT,
+		);
+	}
+
+	if (keys.length === 0) return { deleted: [], errors: [] };
+
+	// Validate all keys before sending any requests to avoid partial deletions.
+	// De-duplicated first: a repeated key otherwise consumes chunk budget and is
+	// reported deleted more than once.
+	const validated = [...new Set(keys)].map((key) => assertKey(key));
+
+	const deleted = [];
+	const errors = [];
+
+	for (let i = 0; i < validated.length; i += MAX_DELETE_KEYS_PER_REQUEST) {
+		const chunk = validated.slice(i, i + MAX_DELETE_KEYS_PER_REQUEST);
+
+		const result = await r2Client.send(
+			new DeleteObjectsCommand({
+				Bucket: R2_BUCKET,
+				Delete: { Objects: chunk.map((Key) => ({ Key })) },
+			}),
+		);
+
+		const chunkErrors = (result.Errors ?? []).map((entry) => ({
+			key: entry.Key,
+			code: entry.Code,
+			message: entry.Message,
+		}));
+		const failed = new Set(chunkErrors.map((entry) => entry.key));
+
+		// Derived as requested-minus-failed: a response that omits Deleted[] would
+		// otherwise report nothing deleted while the objects are already gone.
+		deleted.push(...chunk.filter((key) => !failed.has(key)));
+		errors.push(...chunkErrors);
+	}
+
+	return { deleted, errors };
+};
+
 const listObjects = async (prefix, continuationToken) => {
 	const result = await r2Client.send(
 		new ListObjectsV2Command({
@@ -279,6 +326,7 @@ export {
 	readRange,
 	putObject,
 	deleteObject,
+	deleteObjects,
 	listObjects,
 	UPLOAD_URL_TTL_SECONDS,
 	DOWNLOAD_URL_TTL_SECONDS,

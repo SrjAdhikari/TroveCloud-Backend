@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_EXPIRED_FILES_PER_SWEEP,
+	MAX_UPLOAD_RESERVATION_MS,
 	getFile,
 	createDownloadUrl,
 	deleteFile,
@@ -1092,6 +1093,55 @@ describe("initiateUpload", () => {
 		// being dead code no declared size ever reaches.
 		expect(largeWindow).toBeGreaterThanOrEqual(ttlMs + ONE_HOUR_MS);
 		expect(largeWindow).toBeLessThan(ttlMs + ONE_HOUR_MS + 10_000);
+	});
+
+	it("never lets a reservation deadline outrun MAX_UPLOAD_RESERVATION_MS", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+
+		// Past this declared size the transfer estimate pins the 1-hour clamp, so
+		// the per-file cap above it is the worst case the formula can produce.
+		const ceilingSize = (ONE_HOUR_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
+		expect(MAX_FILE_UPLOAD_SIZE).toBeGreaterThan(ceilingSize);
+
+		const before = Date.now();
+		const mint = await initiateUpload(
+			dir._id,
+			user._id,
+			"max.bin",
+			MAX_FILE_UPLOAD_SIZE,
+			10 ** 12,
+		);
+		const after = Date.now();
+
+		const reserved = await File.findById(mint.fileId).lean();
+		const deadline = reserved.uploadExpiresAt.getTime();
+
+		// A future reclaim job deletes objects older than this constant; if the
+		// deadline could outrun it, it would delete a still-streaming upload.
+		expect(deadline).toBeLessThanOrEqual(after + MAX_UPLOAD_RESERVATION_MS);
+		// And the clamp really reaches it, so the constant is the true maximum
+		// rather than a loose over-estimate.
+		expect(deadline).toBeGreaterThanOrEqual(before + MAX_UPLOAD_RESERVATION_MS);
+	});
+
+	it("leaves a floor-clamped reservation well inside MAX_UPLOAD_RESERVATION_MS", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+
+		const mint = await initiateUpload(dir._id, user._id, "tiny.txt", 1, 10 ** 9);
+		const after = Date.now();
+
+		const reserved = await File.findById(mint.fileId).lean();
+		const deadline = reserved.uploadExpiresAt.getTime();
+
+		expect(deadline).toBeLessThanOrEqual(after + MAX_UPLOAD_RESERVATION_MS);
+		// The ceiling strictly dominates the 15-minute floor by the clamp gap.
+		// Not strict: mint and `after` can land in the same millisecond, and the
+		// suite's determinism is a held property.
+		expect(deadline).toBeLessThanOrEqual(
+			after + MAX_UPLOAD_RESERVATION_MS - (ONE_HOUR_MS - FIFTEEN_MINUTES_MS),
+		);
 	});
 
 	it("rejects a declared size over the per-file cap", async () => {

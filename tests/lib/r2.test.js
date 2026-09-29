@@ -1,9 +1,10 @@
-import { afterAll, describe, it, expect } from "vitest";
+import { afterAll, afterEach, describe, it, expect, vi } from "vitest";
 import { Readable } from "node:stream";
 import { randomUUID } from "node:crypto";
 
 import envConfig from "../../src/constants/env.js";
 import {
+	r2Client,
 	buildFileKey,
 	buildProfilePictureKey,
 	presignPut,
@@ -12,6 +13,7 @@ import {
 	readRange,
 	putObject,
 	deleteObject,
+	deleteObjects,
 	listObjects,
 } from "../../src/lib/r2.js";
 
@@ -248,6 +250,140 @@ describe("r2 object operations", () => {
 		expect(page.keys).toHaveLength(2);
 		expect(page.nextToken).toBeUndefined();
 		expect(page.keys[0]).toHaveProperty("lastModified");
+	});
+});
+
+describe("r2 batch delete", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("issues no request when there is nothing to delete", async () => {
+		const send = vi.spyOn(r2Client, "send");
+
+		expect(await deleteObjects([])).toEqual({ deleted: [], errors: [] });
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it("rejects a nullish key list instead of silently deleting nothing", async () => {
+		await expect(deleteObjects()).rejects.toMatchObject({ statusCode: 400 });
+		await expect(deleteObjects(null)).rejects.toMatchObject({ statusCode: 400 });
+	});
+
+	it("deletes a key and reports it as deleted", async () => {
+		const key = await put(".batchone", "one");
+
+		expect(await deleteObjects([key])).toEqual({ deleted: [key], errors: [] });
+		expect(await getObjectMetadata(key)).toBeNull();
+	});
+
+	it("treats a key that is not in the bucket as deleted, not as an error", async () => {
+		const present = await put(".batchpresent", "here");
+		const absent = keyFor(".batchabsent");
+
+		const result = await deleteObjects([present, absent]);
+
+		expect(result.errors).toEqual([]);
+		expect(result.deleted).toEqual(expect.arrayContaining([present, absent]));
+		expect(await getObjectMetadata(present)).toBeNull();
+	});
+
+	it("splits a batch larger than the 1000-key S3 limit across commands", async () => {
+		const keys = Array.from({ length: 1001 }, (_, index) =>
+			buildFileKey(ID, RUN, `.chunk${index}`),
+		);
+
+		// Uploading 1001 objects to assert an arithmetic boundary is not worth
+		// the bucket traffic, so only the command split is exercised here.
+		const send = vi.spyOn(r2Client, "send").mockImplementation(async (command) => ({
+			Deleted: command.input.Delete.Objects,
+		}));
+
+		const result = await deleteObjects(keys);
+
+		expect(send).toHaveBeenCalledTimes(2);
+		expect(send.mock.calls[0][0].input.Delete.Objects).toHaveLength(1000);
+		expect(send.mock.calls[1][0].input.Delete.Objects).toHaveLength(1);
+		expect(result.deleted).toEqual(keys);
+	});
+
+	it("validates every key before issuing any request", async () => {
+		const keys = [
+			...Array.from({ length: 1000 }, (_, index) =>
+				buildFileKey(ID, RUN, `.guard${index}`),
+			),
+			"../../etc/passwd",
+		];
+
+		const send = vi.spyOn(r2Client, "send").mockResolvedValue({ Deleted: [] });
+
+		// Validating per chunk would delete the first 1000 keys before the
+		// malformed one in the second chunk was ever looked at.
+		await expect(deleteObjects(keys)).rejects.toMatchObject({ statusCode: 400 });
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it("surfaces per-key failures instead of swallowing them", async () => {
+		const kept = buildFileKey(ID, RUN, ".batchdenied");
+		const gone = buildFileKey(ID, RUN, ".batchok");
+
+		// R2 will not fail a delete on demand, so the Errors[] branch is the one
+		// thing here that has to be driven from a stubbed response.
+		vi.spyOn(r2Client, "send").mockResolvedValue({
+			Deleted: [{ Key: gone }],
+			Errors: [{ Key: kept, Code: "AccessDenied", Message: "Access Denied" }],
+		});
+
+		// removeObject logs and moves on; a caller of this one must be able to
+		// tell which keys the bucket still holds.
+		expect(await deleteObjects([gone, kept])).toEqual({
+			deleted: [gone],
+			errors: [{ key: kept, code: "AccessDenied", message: "Access Denied" }],
+		});
+	});
+
+	it("reports the requested keys as deleted when the response omits Deleted[]", async () => {
+		const keys = [
+			buildFileKey(ID, RUN, ".quietone"),
+			buildFileKey(ID, RUN, ".quiettwo"),
+		];
+
+		// A quiet-mode or shape-shifted response carries no Deleted[]. Reading the
+		// deleted set off it reports "0 deleted" while the objects are gone.
+		vi.spyOn(r2Client, "send").mockResolvedValue({});
+
+		expect(await deleteObjects(keys)).toEqual({ deleted: keys, errors: [] });
+	});
+
+	it("excludes a per-key failure from the deleted set with no Deleted[] to go on", async () => {
+		const gone = buildFileKey(ID, RUN, ".quietok");
+		const kept = buildFileKey(ID, RUN, ".quietdenied");
+
+		vi.spyOn(r2Client, "send").mockResolvedValue({
+			Errors: [{ Key: kept, Code: "AccessDenied", Message: "Access Denied" }],
+		});
+
+		expect(await deleteObjects([gone, kept])).toEqual({
+			deleted: [gone],
+			errors: [{ key: kept, code: "AccessDenied", message: "Access Denied" }],
+		});
+	});
+
+	it("deletes a duplicated key once and reports it once", async () => {
+		const key = buildFileKey(ID, RUN, ".batchdupe");
+
+		const send = vi
+			.spyOn(r2Client, "send")
+			.mockImplementation(async (command) => ({
+				Deleted: command.input.Delete.Objects,
+			}));
+
+		// Duplicates otherwise eat the 1000-key chunk budget and inflate `deleted`.
+		expect(await deleteObjects([key, key, key])).toEqual({
+			deleted: [key],
+			errors: [],
+		});
+		expect(send.mock.calls[0][0].input.Delete.Objects).toEqual([{ Key: key }]);
 	});
 });
 

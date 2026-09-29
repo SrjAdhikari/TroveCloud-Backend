@@ -1,6 +1,6 @@
 # Error Codes
 
-> **Status:** As-of 2026-09-10. This document is a glossary that drifts as the codebase evolves — refresh it when adding or removing codes from `src/constants/appErrorCode.js`.
+> **Status:** As-of 2026-09-29. This document is a glossary that drifts as the codebase evolves — refresh it when adding or removing codes from `src/constants/appErrorCode.js`.
 
 The TroveCloud backend returns structured errors with stable, machine-readable codes. The frontend consumes these codes to drive UI behavior (which form to redirect to, which message to show, when to retry). This document is the contract: the source of truth for what each code means and where it's thrown.
 
@@ -146,6 +146,14 @@ Returned by `POST /api/drive/import`. Most appear inside the `failed[]` array of
 | `INVALID_DRIVE_TOKEN`         | failed[]     | Drive returned `401` for the access token (expired / invalid) while fetching an item. A missing or malformed `accessToken` body field is now rejected upstream as `VALIDATION_ERROR`, so this code only appears per-item in `failed[]`. | `googleDrive.js` (401 mapping), surfaced per-item by `drive.service.js` |
 | `UNSUPPORTED_DRIVE_TYPE`      | failed[]     | Picked item is a Shortcut, or a Google-native type without an export mapping (Forms, Drawings, etc.). | `importItem` in `drive.service.js`                                                          |
 
+### Orphan Reconciliation
+
+Raised by the orphan-reconciliation maintenance job, which runs as a CLI script (`npm run reconcile:orphans`) rather than an endpoint — so this code never reaches an HTTP response. See [`../architecture/orphan-reconciliation.md`](../architecture/orphan-reconciliation.md) for the job itself.
+
+| Code                    | Typical HTTP | Meaning                                                                                                                                                                                                                                                                                                                                       | Where thrown                                            |
+| ----------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `ORPHAN_RATIO_EXCEEDED` | 409          | The reclaim step refused to delete anything: the objects that look orphaned are too large a share of the objects scanned (20% by default, raised for a single run with `--max-ratio`), or the scanned count it was handed is not a usable denominator. Nothing is deleted either way. Not returned by any endpoint — see [Currently unused codes](#currently-unused-codes). | `reclaimOrphans` in `src/services/reconcile.service.js` |
+
 ---
 
 ## 🔁 Error Codes from Framework Errors
@@ -211,6 +219,8 @@ Frontend code should always switch on `code` to drive UI behavior. Never parse `
 `PROFILE_PICTURE_NOT_FOUND` is defined in `appErrorCode.js` but is not thrown anywhere today. Profile pictures are fetched straight from R2 through a presigned URL, so a missing object surfaces as R2's own 404 on the `<img>` request rather than as an API error. Kept in the enum in case a serving route is ever reintroduced.
 
 `FILE_DELETE_FAILED` and `FILE_RENAME_FAILED` are defined in `appErrorCode.js` but are not thrown anywhere today. `deleteFile` warn-logs a failed object delete rather than surfacing one — the row is already gone and the DB is the source of truth — and `updateFile` throws `FILE_NOT_FOUND` when its compare-and-set matches nothing. Kept in the enum in case either path ever needs to fail loudly.
+
+`ORPHAN_RATIO_EXCEEDED` is thrown, but never over HTTP. `reclaimOrphans` in `src/services/reconcile.service.js` raises it when the share of objects that look orphaned exceeds the run's safety limit — or when the scanned count it was given cannot serve as a denominator — and aborts before deleting anything. Its only caller is the `npm run reconcile:orphans` maintenance script, which prints the message and exits non-zero; no route reaches that service, so the code cannot appear in an API response. It carries a 409 so the guard is already correct for an admin endpoint over the same service, should one ever be added. See [`../architecture/orphan-reconciliation.md`](../architecture/orphan-reconciliation.md).
 
 `LAST_SUPERADMIN` is defined in `appErrorCode.js` but is not thrown anywhere today. The deployment runs a single-superadmin topology — the only scenarios the guard would catch (demoting or deleting the last superadmin) cannot arise without first creating a second superadmin. Kept in the enum so the guard can be re-added without churning the error contract if topology ever changes.
 
