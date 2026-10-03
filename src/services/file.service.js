@@ -253,6 +253,17 @@ const rollbackFailedUpload = async (fileId, parentDirId, objectKey) => {
 	}
 };
 
+/** Reads a user's stored bytes from the root directory's denormalized size */
+const getStoredBytes = async (userId, session) => {
+	const rootDir = await Directory.findOne(
+		{ userId, parentDirId: null },
+		"size",
+		{ session },
+	).lean();
+
+	return rootDir?.size ?? 0;
+};
+
 const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 	if (!isValidStorageLimit(totalStorageLimit)) {
 		throw new AppError(
@@ -262,13 +273,7 @@ const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 		);
 	}
 
-	const rootDir = await Directory.findOne(
-		{ userId, parentDirId: null },
-		"size",
-		{ session },
-	).lean();
-
-	if ((rootDir?.size ?? 0) + bytes > totalStorageLimit) {
+	if ((await getStoredBytes(userId, session)) + bytes > totalStorageLimit) {
 		throw new AppError(
 			"Storage limit exceeded",
 			BAD_REQUEST,
@@ -920,6 +925,8 @@ export {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_EXPIRED_FILES_PER_SWEEP,
 	MAX_UPLOAD_RESERVATION_MS,
+	isValidStorageLimit,
+	getStoredBytes,
 	getFile,
 	createDownloadUrl,
 	assertUploadableFileName,
