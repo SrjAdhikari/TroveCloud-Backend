@@ -30,8 +30,8 @@ const statsOf = async (id) => {
 
 const folderCountOf = async (id) => (await Directory.findById(id)).folderCount;
 
-// The limit is always explicit: `uploadFileFromServer` defaults to the declared
-// server-side exemption, and a test must not silently ride on it.
+// The limit is always explicit: `uploadFileFromServer` has no default and
+// rejects an omitted one, so a test must pass a real quota.
 const uploadInto = async (parentId, userId, name, body, storageLimit = 10 ** 9) => {
 	const file = await uploadFileFromServer(
 		parentId,

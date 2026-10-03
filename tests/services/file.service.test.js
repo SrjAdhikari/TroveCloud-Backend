@@ -132,8 +132,8 @@ const expire = async (fileId) =>
 		{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
 	);
 
-// The limit is always explicit: `uploadFileFromServer` defaults to the declared
-// server-side exemption, and a test must not silently ride on it.
+// The limit is always explicit: `uploadFileFromServer` has no default and
+// rejects an omitted one, so a test must pass a real quota.
 const upload = async (parentId, userId, name, body, storageLimit = 10 ** 9) => {
 	const file = await uploadFileFromServer(
 		parentId,
@@ -2945,12 +2945,12 @@ describe("quota enforcement fails closed on an unusable limit", () => {
 		expect(await File.countDocuments({ userId: user._id })).toBe(0);
 	});
 
-	it("rejects an omitted limit instead of granting an exemption", async () => {
+	it("rejects an omitted limit instead of granting unlimited storage", async () => {
 		const user = await createTestUser();
 		const dir = await createTestDirectory(user._id);
 
-		// Exemption is the caller's to declare. A forgotten argument must fail
-		// closed, not silently grant unlimited storage.
+		// A forgotten argument must fail closed, not silently grant unlimited
+		// storage.
 		await expect(
 			uploadFileFromServer(
 				dir._id,
@@ -3024,22 +3024,136 @@ describe("quota enforcement fails closed on an unusable limit", () => {
 		expect(await dirStats(root._id)).toEqual({ size: 900, fileCount: 1 });
 	});
 
-	it("accepts an explicitly declared exemption", async () => {
+	it("rejects an infinite limit and leaves no file or object behind", async () => {
 		const user = await createTestUser();
 		const dir = await createTestDirectory(user._id);
 
-		// How Drive import declares it, until issue #65 lands.
-		const file = await uploadFileFromServer(
-			dir._id,
-			user._id,
-			"imported.txt",
-			Readable.from(Buffer.from("bytes")),
-			Number.POSITIVE_INFINITY,
-		);
-		createdKeys.add(file.objectKey);
+		// The quota runs after the bytes land, so capture the claimed key mid-stream.
+		let claimedKey = null;
+		let observed = false;
+		const source = new Readable({
+			read() {
+				if (observed) return;
+				observed = true;
 
-		expect(file.status).toBe("ready");
-		expect(await dirStats(dir._id)).toEqual({ size: 5, fileCount: 1 });
+				File.findOne({ userId: user._id })
+					.select("+objectKey")
+					.lean()
+					.then((row) => {
+						claimedKey = row.objectKey;
+						createdKeys.add(claimedKey);
+						this.push(Buffer.from("bytes"));
+						this.push(null);
+					})
+					.catch((err) => this.destroy(err));
+			},
+		});
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"imported.txt",
+				source,
+				Number.POSITIVE_INFINITY,
+			),
+		).rejects.toMatchObject({
+			code: "INVALID_STORAGE_LIMIT",
+			statusCode: 500,
+		});
+
+		expect(claimedKey).not.toBeNull();
+		expect(await objectExists(claimedKey)).toBe(false);
+		expect(await File.countDocuments({ userId: user._id })).toBe(0);
+		expect(await dirStats(dir._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("rejects a negative limit on a mint without sweeping", async () => {
+		const user = await createTestUser({ storageLimit: 1000 });
+		const root = await createTestDirectory(user._id);
+
+		const ghost = await initiateUpload(
+			root._id,
+			user._id,
+			"ghost.txt",
+			400,
+			user.storageLimit,
+		);
+		await trackObjectKey(ghost.fileId);
+		await expire(ghost.fileId);
+
+		for (const limit of [-1, Number.NEGATIVE_INFINITY]) {
+			await expect(
+				initiateUpload(root._id, user._id, "x.txt", 100, limit),
+			).rejects.toMatchObject({
+				code: "INVALID_STORAGE_LIMIT",
+				statusCode: 500,
+			});
+		}
+
+		// A negative limit is a config fault too, so the expired reservation survives.
+		expect((await File.findById(ghost.fileId).lean()).status).toBe("pending");
+		expect(await File.countDocuments({ userId: user._id })).toBe(1);
+		expect(await dirStats(root._id)).toEqual({ size: 400, fileCount: 1 });
+	});
+
+	it("rejects a negative limit on a server-side create and leaves no file or object behind", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+
+		let claimedKey = null;
+		let observed = false;
+		const source = new Readable({
+			read() {
+				if (observed) return;
+				observed = true;
+
+				File.findOne({ userId: user._id })
+					.select("+objectKey")
+					.lean()
+					.then((row) => {
+						claimedKey = row.objectKey;
+						createdKeys.add(claimedKey);
+						this.push(Buffer.from("bytes"));
+						this.push(null);
+					})
+					.catch((err) => this.destroy(err));
+			},
+		});
+
+		await expect(
+			uploadFileFromServer(dir._id, user._id, "imported.txt", source, -1),
+		).rejects.toMatchObject({
+			code: "INVALID_STORAGE_LIMIT",
+			statusCode: 500,
+		});
+
+		expect(claimedKey).not.toBeNull();
+		expect(await objectExists(claimedKey)).toBe(false);
+		expect(await File.countDocuments({ userId: user._id })).toBe(0);
+		expect(await dirStats(dir._id)).toEqual({ size: 0, fileCount: 0 });
+	});
+
+	it("treats a limit of 0 as valid, so any non-empty upload exceeds it", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+
+		await expect(
+			initiateUpload(dir._id, user._id, "x.txt", 1, 0),
+		).rejects.toMatchObject({ code: "STORAGE_LIMIT_EXCEEDED", statusCode: 400 });
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"imported.txt",
+				Readable.from(Buffer.from("bytes")),
+				0,
+			),
+		).rejects.toMatchObject({ code: "STORAGE_LIMIT_EXCEEDED", statusCode: 400 });
+
+		expect(await File.countDocuments({ userId: user._id })).toBe(0);
+		expect(await dirStats(dir._id)).toEqual({ size: 0, fileCount: 0 });
 	});
 });
 
