@@ -291,12 +291,21 @@ const settleExpiredPendingFiles = async (userId, excludedFileId) => {
 /**
  * Attempts to reserve quota for a new file, and reclaims expired files if the attempt fails.
  * If that frees up enough space, it is retried once. A second failure propagates unchanged.
+ * With `reclaim` off, a quota rejection propagates without the sweep.
  */
-const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
+const reserveQuotaWithReclaim = async (
+	userId,
+	reserve,
+	{ excludedFileId, reclaim = true } = {},
+) => {
 	try {
 		await reserve();
 	} catch (error) {
-		if (!(error instanceof AppError) || error.code !== STORAGE_LIMIT_EXCEEDED) {
+		if (
+			!reclaim ||
+			!(error instanceof AppError) ||
+			error.code !== STORAGE_LIMIT_EXCEEDED
+		) {
 			throw error;
 		}
 
@@ -497,7 +506,9 @@ const createUploadClaim = async (
  * @param {string} fileName - The sanitized filename provided by the caller
  * @param {import("node:stream").Readable} fileStream - The bytes to store
  * @param {number} totalStorageLimit - Quota in bytes; must be finite and non-negative
- * @param {number} [perFileCap=MAX_FILE_UPLOAD_SIZE] - Per-file byte ceiling
+ * @param {Object} [options]
+ * @param {number} [options.perFileCap=MAX_FILE_UPLOAD_SIZE] - Per-file byte ceiling
+ * @param {boolean} [options.reclaim=true] - Sweep expired reservations once on a quota rejection
  *
  * @returns {Promise<Object>} The newly created file document (lean)
  * @throws {AppError} Unknown parent, bad extension, quota exceeded, or upload failure
@@ -508,7 +519,7 @@ const uploadFileFromServer = async (
 	fileName,
 	fileStream,
 	totalStorageLimit,
-	perFileCap = MAX_FILE_UPLOAD_SIZE,
+	{ perFileCap = MAX_FILE_UPLOAD_SIZE, reclaim = true } = {},
 ) => {
 	const newFile = await validateAndBuildNewFile(parentDirId, userId, fileName);
 	const { parentDir, fileId, objectKey, contentType } = newFile;
@@ -578,7 +589,10 @@ const uploadFileFromServer = async (
 	};
 
 	try {
-		await reserveQuotaWithReclaim(userId, reserveQuota, fileId);
+		await reserveQuotaWithReclaim(userId, reserveQuota, {
+			excludedFileId: fileId,
+			reclaim,
+		});
 	} catch (error) {
 		await rollbackFailedUpload(fileId, parentDir._id, objectKey);
 

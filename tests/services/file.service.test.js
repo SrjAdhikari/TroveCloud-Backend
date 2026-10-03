@@ -251,7 +251,7 @@ describe("uploadFileFromServer", () => {
 				"big.bin",
 				Readable.from([Buffer.alloc(1024)]),
 				10 ** 9,
-				512,
+				{ perFileCap: 512 },
 			),
 		).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
 
@@ -270,7 +270,7 @@ describe("uploadFileFromServer", () => {
 				"big.bin",
 				source,
 				10 ** 9,
-				512,
+				{ perFileCap: 512 },
 			),
 		).rejects.toThrow();
 
@@ -658,7 +658,7 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 		});
 
 		await expect(
-			uploadFileFromServer(root._id, user._id, "raced.bin", source, 10 ** 9, 512),
+			uploadFileFromServer(root._id, user._id, "raced.bin", source, 10 ** 9, { perFileCap: 512 }),
 		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
 
 		expect(await File.countDocuments({})).toBe(0);
@@ -774,7 +774,7 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 				"huge.bin",
 				Readable.from([Buffer.alloc(1024)]),
 				10 ** 9,
-				512,
+				{ perFileCap: 512 },
 			),
 		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
 
@@ -799,7 +799,7 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 		});
 
 		await expect(
-			uploadFileFromServer(root._id, user._id, "huge.bin", source, 10 ** 9, 512),
+			uploadFileFromServer(root._id, user._id, "huge.bin", source, 10 ** 9, { perFileCap: 512 }),
 		).rejects.toMatchObject({ code: "FILE_TOO_LARGE", statusCode: 400 });
 		createdKeys.add(claimed.objectKey);
 
@@ -2015,6 +2015,36 @@ describe("uploadFileFromServer releases expired files", () => {
 		expect(await objectExists(staleKey)).toBe(false);
 		expect(file.status).toBe("ready");
 		expect(await dirStats(root._id)).toEqual({ size: 5, fileCount: 1 });
+	});
+
+	it("rejects without sweeping when reclaim is off", async () => {
+		const user = await createTestUser({ storageLimit: 100 });
+		const root = await createTestDirectory(user._id);
+
+		const abandoned = await initiateUpload(
+			root._id,
+			user._id,
+			"stale.txt",
+			600,
+			10 ** 9,
+		);
+		await trackObjectKey(abandoned.fileId);
+		await expire(abandoned.fileId);
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"imported.txt",
+				Readable.from(Buffer.from("hello")),
+				user.storageLimit,
+				{ reclaim: false },
+			),
+		).rejects.toMatchObject({ code: "STORAGE_LIMIT_EXCEEDED", statusCode: 400 });
+
+		expect((await File.findById(abandoned.fileId).lean()).status).toBe("pending");
+		expect(await File.countDocuments({ userId: user._id })).toBe(1);
+		expect(await dirStats(root._id)).toEqual({ size: 600, fileCount: 1 });
 	});
 
 	it("leaves a reservation whose window is still open untouched", async () => {

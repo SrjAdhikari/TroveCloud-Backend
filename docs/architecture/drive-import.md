@@ -121,7 +121,7 @@ Exports `importFromDrive(userId, accessToken, items, parentDirId, storageLimit)`
 
 Internal helpers:
 
-- `importItem(ctx, driveId, targetParentDirId, depth)` — metadata fetch, type branching, recursion, streaming. `ctx = { userId, accessToken, storageLimit, totalBytes, imported, failed, seen }`.
+- `importItem(ctx, driveId, targetParentDirId, depth, knownMeta)` — metadata fetch, type branching, recursion, streaming. `knownMeta` is a child's entry from its folder's listing, used in place of a metadata fetch; top-level items pass `null` and are re-fetched, since the Picker's `mimeType` is client-supplied. `ctx = { userId, accessToken, storageLimit, totalBytes, reclaimSpent, imported, failed, seen }`.
 - `sanitizeDirName(name)` — trims, strips control chars, pads names shorter than 3 chars with `_` suffix, truncates over 50, falls back to `"Imported folder"` if empty. Needed because `Directory.name` has `minlength: 3, maxlength: 50` but Drive folder names aren't bounded.
 - `sanitizeFileName(name)` — same treatment against `File.name` constraints (no minlength today; still strip control chars and cap at 255, matching the existing `file.controller.js` sanitization).
 

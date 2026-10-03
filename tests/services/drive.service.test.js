@@ -19,7 +19,13 @@ import { deleteObject, getObjectMetadata } from "../../src/lib/r2.js";
 import File from "../../src/models/file.model.js";
 import Directory from "../../src/models/directory.model.js";
 
-import { createTestUser, createTestDirectory } from "../factories.js";
+import { ONE_MINUTE_MS } from "../../src/utils/date.js";
+
+import {
+	createTestUser,
+	createTestDirectory,
+	createTestFile,
+} from "../factories.js";
 
 vi.mock("../../src/lib/googleDrive.js", async (importOriginal) => ({
 	...(await importOriginal()),
@@ -42,9 +48,26 @@ vi.mock("../../src/constants/env.js", async (importOriginal) => {
 	};
 });
 
+// Lookups for keys in this set fail; every other key reaches the real bucket.
+const { failingLookupKeys } = vi.hoisted(() => ({ failingLookupKeys: new Set() }));
+
+vi.mock("../../src/lib/r2.js", async (importOriginal) => {
+	const r2 = await importOriginal();
+	return {
+		...r2,
+		getObjectMetadata: vi.fn(async (key) => {
+			if (failingLookupKeys.has(key)) {
+				throw Object.assign(new Error("lookup failed"), { name: "TimeoutError" });
+			}
+			return r2.getObjectMetadata(key);
+		}),
+	};
+});
+
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 afterEach(() => {
+	failingLookupKeys.clear();
 	vi.clearAllMocks();
 });
 
@@ -436,6 +459,44 @@ describe("drive importFromDrive", () => {
 			expect(await dirStats(root)).toEqual({ size: 6, fileCount: 1 });
 			expect(await File.exists({ userId: user._id, name: "over.txt" })).toBeNull();
 			await expectObjectRemoved("d-child-over");
+		});
+
+		it("sweeps once per import when an expired reservation's lookup keeps failing", async () => {
+			const user = await createTestUser({ storageLimit: 5 });
+			const root = await createTestDirectory(user._id, { size: 5, fileCount: 1 });
+			const stale = await createTestFile(user._id, root._id, {
+				status: "pending",
+				size: 5,
+			});
+			await File.updateOne(
+				{ _id: stale._id },
+				{ uploadExpiresAt: new Date(Date.now() - ONE_MINUTE_MS) },
+			);
+			failingLookupKeys.add(stale.objectKey);
+
+			const items = mockDriveFiles(user, [
+				{ id: "d-1", name: "one.txt", body: "1" },
+				{ id: "d-2", name: "two.txt", body: "2" },
+				{ id: "d-3", name: "three.txt", body: "3" },
+			]);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.imported).toEqual([]);
+			expect(result.failed).toEqual([
+				{ driveId: "d-1", name: "one.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+				{ driveId: "d-2", name: "two.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+				{ driveId: "d-3", name: "three.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+			]);
+			const staleLookups = getObjectMetadata.mock.calls.filter(
+				([key]) => key === stale.objectKey,
+			);
+			expect(staleLookups).toHaveLength(1);
+			expect((await File.findById(stale._id).lean()).status).toBe("pending");
+			expect(await dirStats(root)).toEqual({ size: 5, fileCount: 1 });
+			await expectObjectRemoved("d-1");
+			await expectObjectRemoved("d-2");
+			await expectObjectRemoved("d-3");
 		});
 
 		describe("transfer cap", () => {
