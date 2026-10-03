@@ -5,6 +5,9 @@ import { Readable, pipeline } from "node:stream";
 
 import {
 	assertUploadableFileName,
+	getStoredBytes,
+	isValidStorageLimit,
+	settleExpiredPendingFiles,
 	uploadFileFromServer,
 } from "./file.service.js";
 import { createDirectory } from "./directory.service.js";
@@ -106,10 +109,35 @@ const listAllChildren = async (accessToken, folderId) => {
 };
 
 /**
+ * Advisory quota pre-flight for a file with a declared size, so an over-quota
+ * file is rejected before its download. The in-upload check stays authoritative.
+ */
+const assertDeclaredSizeFits = async (ctx, declaredSize) => {
+	const fits = async () =>
+		(await getStoredBytes(ctx.userId)) + declaredSize <= ctx.storageLimit;
+
+	if (await fits()) return;
+
+	if (!ctx.reclaimSpent) {
+		const deletedFiles = await settleExpiredPendingFiles(ctx.userId);
+		if (deletedFiles.length > 0 && (await fits())) return;
+
+		// Mirrors the upload path: only a sweep that still ends in rejection is spent.
+		ctx.reclaimSpent = true;
+	}
+
+	throw new AppError(
+		"Storage limit exceeded",
+		BAD_REQUEST,
+		STORAGE_LIMIT_EXCEEDED,
+	);
+};
+
+/**
  * Streams a Drive file (regular download or Google-native export) into the
  * user's tree via the `uploadFileFromServer` service. Tracks bytes so the
- * aggregate cap can be enforced, and short-circuits early when the per-file
- * cap is known up front (regular files with a `size` in metadata).
+ * aggregate cap can be enforced, and short-circuits early on the size caps and
+ * the quota when the size is known up front (regular files with a `size` in metadata).
  */
 const streamFileIntoTrove = async (
 	ctx,
@@ -118,32 +146,36 @@ const streamFileIntoTrove = async (
 	displayName,
 ) => {
 	const isGoogleNative = meta.mimeType.startsWith(GOOGLE_APPS_PREFIX);
+	const declaredSize =
+		!isGoogleNative && meta.size ? Number(meta.size) : Number.NaN;
+	const hasDeclaredSize = Number.isFinite(declaredSize);
 
 	// Pre-flight size check for regular files.
-	if (!isGoogleNative && meta.size) {
-		const declaredSize = Number(meta.size);
+	if (hasDeclaredSize) {
+		if (declaredSize > MAX_FILE_UPLOAD_SIZE) {
+			throw new AppError(
+				"File exceeds per-file size cap",
+				BAD_REQUEST,
+				DRIVE_IMPORT_LIMIT_EXCEEDED,
+			);
+		}
 
-		if (Number.isFinite(declaredSize)) {
-			if (declaredSize > MAX_FILE_UPLOAD_SIZE) {
-				throw new AppError(
-					"File exceeds per-file size cap",
-					BAD_REQUEST,
-					DRIVE_IMPORT_LIMIT_EXCEEDED,
-				);
-			}
-
-			if (ctx.totalBytes + declaredSize > MAX_DRIVE_IMPORT_SIZE) {
-				throw new AppError(
-					"Import exceeds aggregate size cap",
-					BAD_REQUEST,
-					DRIVE_IMPORT_LIMIT_EXCEEDED,
-				);
-			}
+		if (ctx.totalBytes + declaredSize > MAX_DRIVE_IMPORT_SIZE) {
+			throw new AppError(
+				"Import exceeds aggregate size cap",
+				BAD_REQUEST,
+				DRIVE_IMPORT_LIMIT_EXCEEDED,
+			);
 		}
 	}
 
 	// Before the download: a rejected name reads no bytes, so the transfer cap never charges it.
 	assertUploadableFileName(displayName);
+
+	// A bad limit is a config fault; the in-upload check reports it without a sweep.
+	if (hasDeclaredSize && isValidStorageLimit(ctx.storageLimit)) {
+		await assertDeclaredSizeFits(ctx, declaredSize);
+	}
 
 	const remainingBudget = MAX_DRIVE_IMPORT_SIZE - ctx.totalBytes;
 	const counter = createByteCounter(MAX_FILE_UPLOAD_SIZE, remainingBudget);
