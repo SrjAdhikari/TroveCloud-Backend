@@ -19,6 +19,7 @@ const importDriveHandler = async (req, res) => {
 		accessToken,
 		items,
 		targetParentDirId,
+		user.storageLimit,
 	);
 
 	return res.status(OK).json({
