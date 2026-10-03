@@ -18,7 +18,7 @@ Keeping the access token ephemeral (no persistence, no `refresh_token` in the DB
 
 - **Scope: one-shot pick-and-import.** The access token is passed per request. No persistence, no `refresh_token` storage, no User-schema changes.
 - **Google-native files** (Docs / Sheets / Slides) are converted to Office formats (`.docx`, `.xlsx`, `.pptx`) via Drive's `export` endpoint. Unsupported native types (Forms, Drawings, Jamboards, Sites, Shortcuts) are reported as failures in the response.
-- **OAuth scope: `drive.file`.** Drive API only sees items the user explicitly picked via Google Picker. Google Identity Services on the frontend obtains the token; the backend never exchanges codes and never sees the Google client secret.
+- **OAuth scope: `drive.readonly`.** The narrower `drive.file` grants a picked folder but not its children, so `files.list` would silently drop children the app has never touched and folder import would come back incomplete. `drive.readonly` is a restricted scope and needs Google's verification before public launch. Google Identity Services on the frontend obtains the token; the backend never exchanges codes and never sees the Google client secret.
 - **Drive API client: raw `fetch`.** Consistent with `src/lib/githubAuth.js` — no `googleapis` SDK dependency.
 - **URL choice:** `/api/drive/import` for now. If additional providers (Dropbox, OneDrive) land later, re-scope to `/api/imports/{provider}`.
 
@@ -64,11 +64,11 @@ Malformed input (missing / wrong-type body fields) returns `400 VALIDATION_ERROR
 For each picked item:
 
 1. **Re-fetch metadata from Drive.** The client-supplied `mimeType` is not trusted — users could spoof.
-2. **Early reject**: trashed items, files over the per-file size cap, or items whose recursion depth would exceed the cap.
+2. **Early reject**: trashed items, files over the per-file size cap, items whose recursion depth would exceed the cap, or files whose sanitized name does not end in a simple extension (`INVALID_INPUT`). All of these are rejected before the download or export starts, except Google-native files over the per-file cap: they have no declared size, so they trip mid-stream.
 3. **Folder** (`application/vnd.google-apps.folder`) → create a TroveCloud `Directory`, paginate children via `files.list`, recurse depth-first.
 4. **Google-native** → look up the export MIME in `GOOGLE_APPS_EXPORT_MAP`. If not mapped (Forms, Drawings, Shortcuts, etc.), push to `failed` with `UNSUPPORTED_DRIVE_TYPE`.
-5. **Regular file** → call the Drive download endpoint, wrap `response.body` as a Node Readable (`Readable.fromWeb`), and pass to the existing `uploadFileFromServer` service.
-6. **Track cumulative bytes.** Once aggregate exceeds the per-request cap, short-circuit remaining items with `DRIVE_IMPORT_LIMIT_EXCEEDED`.
+5. **Regular file** → call the Drive download endpoint, wrap `response.body` as a Node Readable (`Readable.fromWeb`), and pass to the existing `uploadFileFromServer` service, which enforces the user's storage quota against the streamed size. An item that would push the user past their quota lands in `failed` with `STORAGE_LIMIT_EXCEEDED`; later items that still fit are imported.
+6. **Track transferred bytes.** Bytes streamed from Drive count against the per-request cap, including those of a file later rejected (e.g. over quota). File names are validated before the download or export starts, so an unsupported name never opens a transfer and costs nothing against the cap. Once the cap is spent, remaining items fail fast with `DRIVE_IMPORT_LIMIT_EXCEEDED` without being downloaded.
 
 Per-item processing runs inside a `try / catch`: any failure pushes the item to `failed` with a reason code and moves on. Partial success is the user-facing contract.
 
@@ -112,19 +112,20 @@ Error mapping in the shared catch:
 
 **`src/services/drive.service.js`** — orchestrator.
 
-Exports `importFromDrive(userId, accessToken, items, parentDirId)`:
+Exports `importFromDrive(userId, accessToken, items, parentDirId, storageLimit)`:
 
+- `storageLimit` is the controller's `req.user.storageLimit`, passed to every `uploadFileFromServer` call so each file is checked against the quota.
 - Resolves `parentDirId` to `user.rootDirId` if omitted. Parent-ownership is validated implicitly by `createDirectory`'s existing check — no extra query needed at the top level.
 - Deduplicates `items` by `id`. Also maintains a `seen: Set<driveId>` across folder traversal, so picking a folder AND a file inside that folder imports the file once.
 - Iterates items sequentially. This keeps Drive API quota (1000 req / 100s / user) safe for the MVP. Can be parallelized with `p-limit` later if p95 import latency becomes a problem.
 
 Internal helpers:
 
-- `importItem(ctx, driveId, targetParentDirId, depth)` — metadata fetch, type branching, recursion, streaming. `ctx = { userId, accessToken, totalBytes, caps, imported, failed, seen }`.
+- `importItem(ctx, driveId, targetParentDirId, depth)` — metadata fetch, type branching, recursion, streaming. `ctx = { userId, accessToken, storageLimit, totalBytes, imported, failed, seen }`.
 - `sanitizeDirName(name)` — trims, strips control chars, pads names shorter than 3 chars with `_` suffix, truncates over 50, falls back to `"Imported folder"` if empty. Needed because `Directory.name` has `minlength: 3, maxlength: 50` but Drive folder names aren't bounded.
 - `sanitizeFileName(name)` — same treatment against `File.name` constraints (no minlength today; still strip control chars and cap at 255, matching the existing `file.controller.js` sanitization).
 
-**Streaming through the server:** Drive's response body arrives as a Web ReadableStream. It is wrapped in a `Transform` that counts bytes and aborts the pipeline when the post-hoc total exceeds the per-file cap — necessary because Google-native `export` responses have no pre-flight `size`. The counter-wrapped Readable is then passed to the existing `uploadFileFromServer(parentDirId, userId, displayName, readable, totalStorageLimit)` in `src/services/file.service.js`, which already handles the DB row creation, the write to R2, and rollback on pipeline failure.
+**Streaming through the server:** Drive's response body arrives as a Web ReadableStream. It is wrapped in a `Transform` that counts bytes and aborts the pipeline when the post-hoc total exceeds the per-file cap or the remaining per-request budget — necessary because Google-native `export` responses have no pre-flight `size`. The counter-wrapped Readable is then passed to the existing `uploadFileFromServer(parentDirId, userId, displayName, readable, totalStorageLimit)` in `src/services/file.service.js` with the user's `storageLimit`, which handles the DB row creation, the write to R2, the quota check against the counted bytes, and rollback (row and object) when the stream or the quota check fails.
 
 **`src/validators/drive.validator.js`** — request-body validation.
 
@@ -170,7 +171,8 @@ Conservative defaults. The two byte caps are read from the environment through `
 | --------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | Max items per request       | 50           | `importDriveSchema` (`validateBody`) — `400 VALIDATION_ERROR` on violation                                               |
 | Per-file size cap           | env (100 MB) | `importItem` pre-flight (via `size` from metadata) AND post-hoc byte counter (for native exports where `size` is absent) |
-| Aggregate bytes per request | env (200 MB) | Running total in `ctx.totalBytes`; short-circuits remaining items with `DRIVE_IMPORT_LIMIT_EXCEEDED`                     |
+| Aggregate bytes per request | env (200 MB) | Transfer budget: `ctx.totalBytes` counts bytes streamed from Drive, including files later rejected; short-circuits remaining items with `DRIVE_IMPORT_LIMIT_EXCEEDED` |
+| Per-user storage quota      | `User.storageLimit` | `checkQuota` inside `uploadFileFromServer`, per file; an over-quota item fails with `STORAGE_LIMIT_EXCEEDED` and the batch continues |
 | Folder recursion depth      | 20           | Parameter passed through `importItem`; matches `$graphLookup` `maxDepth` elsewhere in the codebase                       |
 | `accessToken` string length | ≤ 4096       | `importDriveSchema` (`validateBody`, defensive)                                                                          |
 | Drive fetch timeout         | 15s per call | `AbortSignal.timeout` in `googleDrive.js`                                                                                |
@@ -212,9 +214,9 @@ These are deliberately out of scope for the initial implementation. Each represe
 
 - **Persistent Drive linking / re-import.** No `refresh_token` storage. Would require a dedicated "Link Drive" flow and User-schema changes.
 - **Progress streaming (SSE / WebSocket).** Synchronous response for MVP. Watch for it if p95 exceeds ~10s with real data (a 200 MB import at Drive's ~20 MB/s is ~10s). Confirm any reverse-proxy idle timeout is > 60s before shipping.
-- **Per-user total-storage cap.** Doesn't exist anywhere in the app yet. Drive import multiplies that risk — call it out in the PR description when this lands.
+- **Pre-flight quota check.** The quota is checked after a file's bytes reach R2, so an over-quota file is downloaded and stored before it is rolled back. Rejecting on Drive's declared `size` first is tracked in issue #114.
 - **Rate-limit retry / backoff.** Drive allows 1000 queries / 100s / user. No exponential backoff for MVP — `403 userRateLimitExceeded` bubbles up as `DRIVE_IMPORT_FAILED`. Add retry if real quota pressure appears.
-- **Shared-drive semantics.** `fields=parents` may be empty for shared-drive items — don't rely on it. Otherwise the feature works transparently since `drive.file` scope covers picked items regardless of ownership.
+- **Shared-drive semantics.** `fields=parents` may be empty for shared-drive items — don't rely on it. Otherwise the feature works transparently since `drive.readonly` covers every item the user can read, regardless of ownership.
 - **Client-disconnect cleanup.** If the client disconnects mid-import, the in-flight `uploadFileFromServer` rolls back its own partial write, but directories already created stay. Acceptable given per-item semantics.
 
 ---
@@ -223,7 +225,7 @@ These are deliberately out of scope for the initial implementation. Each represe
 
 ### Manual end-to-end
 
-1. Configure a Google Cloud OAuth client with `drive.file` scope and authorized JavaScript origins pointing at the frontend.
+1. Configure a Google Cloud OAuth client with `drive.readonly` scope and authorized JavaScript origins pointing at the frontend.
 2. On the frontend, use Google Identity Services `initTokenClient` + Google Picker to obtain an `accessToken` and the selected items.
 3. Send a request:
    ```bash
@@ -232,7 +234,7 @@ These are deliberately out of scope for the initial implementation. Each represe
      -b "token=<signed session cookie>" \
      -d '{ "accessToken": "...", "items": [{ "id": "...", "mimeType": "..." }] }'
    ```
-4. Confirm: files appear under `storage/` on disk; `Directory` and `File` rows exist in Mongo; response body matches the contract.
+4. Confirm: objects appear in the Cloudflare R2 bucket; `Directory` and `File` rows exist in Mongo; response body matches the contract.
 
 ### Scenarios to cover
 
@@ -246,11 +248,12 @@ These are deliberately out of scope for the initial implementation. Each represe
 - Trashed item — `DRIVE_ITEM_NOT_FOUND` (or an explicit trashed reason).
 - File > 100 MB — `failed` with size reason.
 - Oversize Google Doc (forces `exportSizeLimitExceeded` from Drive) — `DRIVE_EXPORT_TOO_LARGE`.
-- Expired / tampered access token — `401` from Drive → `INVALID_DRIVE_TOKEN`; no partial data in DB or on disk.
+- Expired / tampered access token — `401` from Drive → `INVALID_DRIVE_TOKEN`; no partial data in the DB or R2.
 - Dedup: pick folder `A` AND `A/file.pdf` explicitly — `file.pdf` appears once.
 - Items length 0 or > 50 — `400 VALIDATION_ERROR`.
 - No session cookie — `401` from `authenticate`.
-- Aggregate limit: pick files summing past `MAX_DRIVE_IMPORT_SIZE` — early items import, later items fail with `DRIVE_IMPORT_LIMIT_EXCEEDED`.
+- Aggregate limit: pick files summing past `MAX_DRIVE_IMPORT_SIZE` — early items import, later items fail with `DRIVE_IMPORT_LIMIT_EXCEEDED`. The same holds with the quota already full: bytes of rejected files still spend the budget.
+- Storage quota: pick files that together exceed the user's remaining quota — the item that would overrun fails with `STORAGE_LIMIT_EXCEEDED`, leaves no file row or object behind, and later items that still fit import.
 
 ### Security audit items
 

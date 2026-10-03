@@ -170,11 +170,11 @@ On the server-side path (Drive import) there is no signature to lean on, so the 
 
 Each user has a total storage quota (`User.storageLimit`, defaulting to the environment-driven `DEFAULT_STORAGE_LIMIT`). It is enforced by the shared `checkQuota` helper, inside the transaction that writes the bytes into the ancestor counters — the reserving transaction on the browser path, the promoting one on the server-side path. The service reads the user's denormalized root-directory `size` and rejects with `STORAGE_LIMIT_EXCEEDED` (400) when the new bytes would exceed the limit. Because the quota read shares the root document that `updateAncestorDirectoryStats` `$inc`s, two concurrent uploads write-conflict on it and `withTransaction` retries the loser against the fresh size — the cap holds without an explicit lock.
 
-The limit is passed in from `req.user.storageLimit`; the service never re-queries it. A non-numeric or absent limit **fails closed**, but as its own error: `checkQuota` raises `INVALID_STORAGE_LIMIT` (500) before it reads anything, rather than borrowing the quota rejection. The distinction is load-bearing, because a quota rejection is what buys a sweep — reporting a configuration fault as one would make every upload attempt drive a destructive cleanup. Google Drive import declares its exemption explicitly by passing `Number.POSITIVE_INFINITY`, which is a valid limit rather than a missing one.
+The limit is passed in from `req.user.storageLimit` on both paths, Drive import included; the service never re-queries it. A non-numeric, infinite, negative, or absent limit **fails closed**, but as its own error: `checkQuota` raises `INVALID_STORAGE_LIMIT` (500) before it reads anything, rather than borrowing the quota rejection. The distinction is load-bearing, because a quota rejection is what buys a sweep — reporting a configuration fault as one would make every upload attempt drive a destructive cleanup.
 
 The quota and its per-category usage breakdown are surfaced to the frontend via `GET /api/storage/usage` — see `../architecture/storage-quota.md`.
 
-> **Note:** Google Drive imports do not yet count against this quota (tracked as GitHub issue #65).
+> **Note:** Google Drive imports count against this quota per file. An over-quota item lands in the import's `failed[]` with `STORAGE_LIMIT_EXCEEDED` and the rest of the batch continues.
 
 ### Why confirm never releases a reservation
 
