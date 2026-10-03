@@ -33,6 +33,7 @@ const {
 	DRIVE_IMPORT_FAILED,
 	UNSUPPORTED_DRIVE_TYPE,
 	DRIVE_IMPORT_LIMIT_EXCEEDED,
+	STORAGE_LIMIT_EXCEEDED,
 } = appErrorCode;
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
@@ -165,10 +166,16 @@ const streamFileIntoTrove = async (
 			displayName,
 			counted,
 			ctx.storageLimit,
+			{ reclaim: !ctx.reclaimSpent },
 		);
 	} catch (error) {
 		// The upload can reject before reading a byte, leaving the Drive socket open.
 		counted.destroy();
+
+		// After one quota rejection, later items skip the sweep; re-running it only repeats its lookups.
+		if (error instanceof AppError && error.code === STORAGE_LIMIT_EXCEEDED) {
+			ctx.reclaimSpent = true;
+		}
 
 		if (counter.state.tripped) {
 			throw new AppError(
@@ -362,6 +369,7 @@ const importFromDrive = async (
 		accessToken,
 		storageLimit,
 		totalBytes: 0,
+		reclaimSpent: false,
 		imported: [],
 		failed: [],
 		seen: new Set(),
