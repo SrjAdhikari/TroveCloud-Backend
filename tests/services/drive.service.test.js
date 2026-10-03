@@ -12,13 +12,37 @@ import {
 import {
 	getDriveFileMetadata,
 	downloadDriveFile,
+	exportGoogleDoc,
+	listDriveFolderChildren,
 } from "../../src/lib/googleDrive.js";
+import { deleteObject, getObjectMetadata } from "../../src/lib/r2.js";
+import File from "../../src/models/file.model.js";
+import Directory from "../../src/models/directory.model.js";
+
+import { createTestUser, createTestDirectory } from "../factories.js";
 
 vi.mock("../../src/lib/googleDrive.js", async (importOriginal) => ({
 	...(await importOriginal()),
 	getDriveFileMetadata: vi.fn(),
 	downloadDriveFile: vi.fn(),
+	exportGoogleDoc: vi.fn(),
+	listDriveFolderChildren: vi.fn(),
 }));
+
+// A tiny transfer cap so the cap test needn't stream real volumes; the other tests stay far below it.
+const { TEST_DRIVE_IMPORT_CAP } = vi.hoisted(() => ({ TEST_DRIVE_IMPORT_CAP: 64 }));
+
+vi.mock("../../src/constants/env.js", async (importOriginal) => {
+	const { default: envConfig } = await importOriginal();
+	return {
+		default: Object.freeze({
+			...envConfig,
+			MAX_DRIVE_IMPORT_SIZE: TEST_DRIVE_IMPORT_CAP,
+		}),
+	};
+});
+
+const FOLDER_MIME = "application/vnd.google-apps.folder";
 
 afterEach(() => {
 	vi.clearAllMocks();
@@ -114,7 +138,7 @@ describe("drive importFromDrive", () => {
 
 		getDriveFileMetadata.mockResolvedValue({
 			id: "drive-readme",
-			name: "README",
+			name: "readme.txt",
 			mimeType: "text/plain",
 			trashed: false,
 		});
@@ -127,12 +151,353 @@ describe("drive importFromDrive", () => {
 			new mongoose.Types.ObjectId().toString(),
 		);
 
-		// Extensionless name — uploadFileFromServer rejects before it consumes a byte.
+		// Unknown parent — the upload rejects before reading the stream.
 		expect(result.imported).toEqual([]);
 		expect(result.failed).toEqual([
-			{ driveId: "drive-readme", name: "README", reason: "INVALID_INPUT" },
+			{ driveId: "drive-readme", name: "readme.txt", reason: "DIRECTORY_NOT_FOUND" },
 		]);
+		expect(downloadDriveFile).toHaveBeenCalledTimes(1);
 
 		await vi.waitFor(() => expect(source.destroyed).toBe(true));
+	});
+
+	it("rejects unsupported file names without opening a download", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const names = { "d-readme": "README", "d-license": "LICENSE", "d-dot": "trailing." };
+
+		getDriveFileMetadata.mockImplementation(async (_token, id) => ({
+			id,
+			name: names[id],
+			mimeType: "text/plain",
+			trashed: false,
+		}));
+		downloadDriveFile.mockImplementation(async () => ({
+			body: Readable.toWeb(Readable.from([Buffer.from("x")])),
+		}));
+
+		const result = await importFromDrive(
+			user._id.toString(),
+			"drive-access-token",
+			Object.keys(names).map((id) => ({ id, mimeType: "text/plain" })),
+			root._id.toString(),
+			user.storageLimit,
+		);
+
+		expect(result.imported).toEqual([]);
+		expect(result.failed).toEqual(
+			Object.entries(names).map(([driveId, name]) => ({
+				driveId,
+				name,
+				reason: "INVALID_INPUT",
+			})),
+		);
+		expect(downloadDriveFile).not.toHaveBeenCalled();
+	});
+
+	it("rejects a Google doc whose truncated name loses its export extension, without exporting it", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		// The 255-char cap slices off the ".docx" appended to an over-long name.
+		const longName = "a".repeat(300);
+
+		getDriveFileMetadata.mockResolvedValue({
+			id: "d-doc",
+			name: longName,
+			mimeType: "application/vnd.google-apps.document",
+			trashed: false,
+		});
+		exportGoogleDoc.mockResolvedValue({
+			body: Readable.toWeb(Readable.from([Buffer.from("x")])),
+		});
+
+		const result = await importFromDrive(
+			user._id.toString(),
+			"drive-access-token",
+			[{ id: "d-doc", mimeType: "application/vnd.google-apps.document" }],
+			root._id.toString(),
+			user.storageLimit,
+		);
+
+		expect(result.imported).toEqual([]);
+		expect(result.failed).toEqual([
+			{ driveId: "d-doc", name: longName, reason: "INVALID_INPUT" },
+		]);
+		expect(exportGoogleDoc).not.toHaveBeenCalled();
+	});
+
+	describe("storage quota", () => {
+		// Keys of every claim, captured mid-stream; rejected ones must be gone from R2.
+		const claimedKeys = new Map();
+
+		afterEach(async () => {
+			await Promise.allSettled(
+				[...claimedKeys.values()].map(async (key) => {
+					try {
+						await deleteObject(key);
+					} catch {}
+				}),
+			);
+			claimedKeys.clear();
+		});
+
+		// Holds the bytes back until the claim row exists, then records its key.
+		const claimCapturingStream = (userId, driveId, name, body) => {
+			let observed = false;
+			return new Readable({
+				read() {
+					if (observed) return;
+					observed = true;
+
+					vi.waitFor(
+						async () => {
+							const row = await File.findOne({ userId, name })
+								.select("+objectKey")
+								.lean();
+							if (!row) throw new Error("claim not created yet");
+							return row.objectKey;
+						},
+						{ timeout: 5000, interval: 20 },
+					)
+						.then((key) => {
+							claimedKeys.set(driveId, key);
+							this.push(Buffer.from(body));
+							this.push(null);
+						})
+						.catch((err) => this.destroy(err));
+				},
+			});
+		};
+
+		// Fresh streams per call; surviving rows' objects are removed by tests/setup.js.
+		const mockDriveFiles = (user, files, folders = []) => {
+			const byId = new Map(files.map((f) => [f.id, f]));
+			const folderById = new Map(folders.map((f) => [f.id, f]));
+
+			getDriveFileMetadata.mockImplementation(async (_token, id) => ({
+				id,
+				name: (folderById.get(id) ?? byId.get(id)).name,
+				mimeType: folderById.has(id) ? FOLDER_MIME : "text/plain",
+				trashed: false,
+			}));
+			listDriveFolderChildren.mockImplementation(async (_token, folderId) => ({
+				files: folderById.get(folderId).children.map((id) => ({
+					id,
+					name: byId.get(id).name,
+					mimeType: "text/plain",
+				})),
+			}));
+			downloadDriveFile.mockImplementation(async (_token, id) => {
+				const { name, body } = byId.get(id);
+				return {
+					body: Readable.toWeb(claimCapturingStream(user._id, id, name, body)),
+				};
+			});
+
+			return [...folders, ...files.filter((f) => !f.inFolder)].map(
+				({ id }) => ({
+					id,
+					mimeType: folderById.has(id) ? FOLDER_MIME : "text/plain",
+				}),
+			);
+		};
+
+		const importAll = (user, root, items) =>
+			importFromDrive(
+				user._id,
+				"drive-access-token",
+				items,
+				root._id.toString(),
+				user.storageLimit,
+			);
+
+		const dirStats = async (dir) => {
+			const { size, fileCount } = await Directory.findById(dir._id).lean();
+			return { size, fileCount };
+		};
+
+		const expectObjectRemoved = async (driveId) => {
+			const key = claimedKeys.get(driveId);
+			expect(key).toBeDefined();
+			expect(await getObjectMetadata(key)).toBeNull();
+		};
+
+		it("fails the item that would exceed the quota and keeps the one that fits", async () => {
+			const user = await createTestUser({ storageLimit: 10 });
+			const root = await createTestDirectory(user._id);
+			const items = mockDriveFiles(user, [
+				{ id: "d-fits", name: "a.txt", body: "123456" },
+				{ id: "d-over", name: "b.txt", body: "12345" },
+			]);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.imported.map((i) => i.driveId)).toEqual(["d-fits"]);
+			expect(result.failed).toEqual([
+				{ driveId: "d-over", name: "b.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+			]);
+			expect(await dirStats(root)).toEqual({ size: 6, fileCount: 1 });
+			expect(await File.exists({ userId: user._id, name: "b.txt" })).toBeNull();
+			await expectObjectRemoved("d-over");
+		});
+
+		it("imports a file that exactly fills the quota (boundary)", async () => {
+			const user = await createTestUser({ storageLimit: 6 });
+			const root = await createTestDirectory(user._id);
+			const items = mockDriveFiles(user, [
+				{ id: "d-exact", name: "exact.txt", body: "123456" },
+			]);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.failed).toEqual([]);
+			expect(result.imported.map((i) => i.driveId)).toEqual(["d-exact"]);
+			expect(await dirStats(root)).toEqual({ size: 6, fileCount: 1 });
+		});
+
+		it("keeps importing smaller items after a quota failure", async () => {
+			const user = await createTestUser({ storageLimit: 10 });
+			const root = await createTestDirectory(user._id);
+			const items = mockDriveFiles(user, [
+				{ id: "d-first", name: "first.txt", body: "123456" },
+				{ id: "d-big", name: "big.txt", body: "12345" },
+				{ id: "d-small", name: "small.txt", body: "1234" },
+			]);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.imported.map((i) => i.driveId)).toEqual([
+				"d-first",
+				"d-small",
+			]);
+			expect(result.failed).toEqual([
+				{ driveId: "d-big", name: "big.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+			]);
+			expect(await dirStats(root)).toEqual({ size: 10, fileCount: 2 });
+			await expectObjectRemoved("d-big");
+		});
+
+		it("fails every item and leaves no file rows when the quota is already full", async () => {
+			const user = await createTestUser({ storageLimit: 5 });
+			const root = await createTestDirectory(user._id, { size: 5, fileCount: 1 });
+			const items = mockDriveFiles(user, [
+				{ id: "d-one", name: "one.txt", body: "1" },
+				{ id: "d-two", name: "two.txt", body: "22" },
+			]);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.imported).toEqual([]);
+			expect(result.failed).toEqual([
+				{ driveId: "d-one", name: "one.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+				{ driveId: "d-two", name: "two.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+			]);
+			expect(await File.countDocuments({ userId: user._id })).toBe(0);
+			expect(await dirStats(root)).toEqual({ size: 5, fileCount: 1 });
+			await expectObjectRemoved("d-one");
+			await expectObjectRemoved("d-two");
+		});
+
+		it("fails an over-quota file inside an imported folder and keeps the folder and its fitting sibling", async () => {
+			const user = await createTestUser({ storageLimit: 10 });
+			const root = await createTestDirectory(user._id);
+			const items = mockDriveFiles(
+				user,
+				[
+					{ id: "d-child-fits", name: "fits.txt", body: "123456", inFolder: true },
+					{ id: "d-child-over", name: "over.txt", body: "12345", inFolder: true },
+				],
+				[
+					{
+						id: "d-folder",
+						name: "Reports",
+						children: ["d-child-fits", "d-child-over"],
+					},
+				],
+			);
+
+			const result = await importAll(user, root, items);
+
+			expect(result.imported.map((i) => [i.driveId, i.kind])).toEqual([
+				["d-folder", "folder"],
+				["d-child-fits", "file"],
+			]);
+			expect(result.failed).toEqual([
+				{
+					driveId: "d-child-over",
+					name: "over.txt",
+					reason: "STORAGE_LIMIT_EXCEEDED",
+				},
+			]);
+
+			const folder = await Directory.findById(result.imported[0].troveId).lean();
+			expect(folder.parentDirId.toString()).toBe(root._id.toString());
+			expect(await dirStats(folder)).toEqual({ size: 6, fileCount: 1 });
+			expect(await dirStats(root)).toEqual({ size: 6, fileCount: 1 });
+			expect(await File.exists({ userId: user._id, name: "over.txt" })).toBeNull();
+			await expectObjectRemoved("d-child-over");
+		});
+
+		describe("transfer cap", () => {
+			const fullAccount = async () => {
+				const user = await createTestUser({ storageLimit: 5 });
+				const root = await createTestDirectory(user._id, { size: 5, fileCount: 1 });
+				return { user, root };
+			};
+
+			const downloadedIds = () => downloadDriveFile.mock.calls.map(([, id]) => id);
+
+			it("counts bytes of quota-rejected files and stops downloading once the cap is spent", async () => {
+				const { user, root } = await fullAccount();
+				const items = mockDriveFiles(user, [
+					{ id: "d-1", name: "one.txt", body: "a".repeat(30) },
+					{ id: "d-2", name: "two.txt", body: "b".repeat(30) },
+					{ id: "d-3", name: "three.txt", body: "c".repeat(30) },
+					{ id: "d-4", name: "four.txt", body: "d".repeat(30) },
+				]);
+
+				const result = await importAll(user, root, items);
+
+				expect(result.imported).toEqual([]);
+				expect(result.failed).toEqual([
+					{ driveId: "d-1", name: "one.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+					{ driveId: "d-2", name: "two.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+					// 60 of 64 bytes spent: this transfer trips the counter mid-stream.
+					{ driveId: "d-3", name: "three.txt", reason: "DRIVE_IMPORT_LIMIT_EXCEEDED" },
+					{ driveId: "d-4", name: null, reason: "DRIVE_IMPORT_LIMIT_EXCEEDED" },
+				]);
+				expect(downloadedIds()).toEqual(["d-1", "d-2", "d-3"]);
+				expect(await File.countDocuments({ userId: user._id })).toBe(0);
+				expect(await dirStats(root)).toEqual({ size: 5, fileCount: 1 });
+				await expectObjectRemoved("d-1");
+				await expectObjectRemoved("d-2");
+				await expectObjectRemoved("d-3");
+			});
+
+			it("fails the rest fast when a quota-rejected transfer lands exactly on the cap", async () => {
+				const { user, root } = await fullAccount();
+				const half = TEST_DRIVE_IMPORT_CAP / 2;
+				const items = mockDriveFiles(user, [
+					{ id: "d-1", name: "one.txt", body: "a".repeat(half) },
+					{ id: "d-2", name: "two.txt", body: "b".repeat(half) },
+					{ id: "d-3", name: "three.txt", body: "c" },
+					{ id: "d-4", name: "four.txt", body: "d" },
+				]);
+
+				const result = await importAll(user, root, items);
+
+				expect(result.imported).toEqual([]);
+				expect(result.failed).toEqual([
+					{ driveId: "d-1", name: "one.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+					{ driveId: "d-2", name: "two.txt", reason: "STORAGE_LIMIT_EXCEEDED" },
+					{ driveId: "d-3", name: null, reason: "DRIVE_IMPORT_LIMIT_EXCEEDED" },
+					{ driveId: "d-4", name: null, reason: "DRIVE_IMPORT_LIMIT_EXCEEDED" },
+				]);
+				expect(downloadedIds()).toEqual(["d-1", "d-2"]);
+				expect(await File.countDocuments({ userId: user._id })).toBe(0);
+				await expectObjectRemoved("d-1");
+				await expectObjectRemoved("d-2");
+			});
+		});
 	});
 });

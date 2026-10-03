@@ -57,8 +57,7 @@ const MAX_EXPIRED_FILES_PER_SWEEP = 25;
 // The maximum time a pending upload can be reserved against the user's quota.
 const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + ONE_HOUR_MS;
 
-const isValidStorageLimit = (limit) =>
-	Number.isFinite(limit) || limit === Number.POSITIVE_INFINITY;
+const isValidStorageLimit = (limit) => Number.isFinite(limit) && limit >= 0;
 
 const isUploadStillLive = (file) =>
 	file.status !== "ready" &&
@@ -310,6 +309,28 @@ const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
 };
 
 /**
+ * Rejects a name that does not end in a simple extension. Callers that fetch
+ * the bytes from elsewhere run it first, so a bad name never opens a transfer.
+ *
+ * @param {string} fileName - The sanitized filename provided by the caller
+ *
+ * @returns {string} The lowercased extension, dot included
+ * @throws {AppError} If the name has no simple extension
+ */
+const assertUploadableFileName = (fileName) => {
+	const extension = path.extname(fileName).toLowerCase();
+	if (!/^\.[a-z0-9]+$/.test(extension)) {
+		throw new AppError(
+			"File name must end in a simple extension",
+			BAD_REQUEST,
+			INVALID_INPUT,
+		);
+	}
+
+	return extension;
+};
+
+/**
  * Verifies the parent directory belongs to the user and creates the new
  * file's identity. Shared by both upload paths so they cannot drift apart.
  *
@@ -322,14 +343,7 @@ const reserveQuotaWithReclaim = async (userId, reserve, excludedFileId) => {
  * @throws {AppError} Bad extension, or a parent the user does not own
  */
 const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
-	const extension = path.extname(fileName).toLowerCase();
-	if (!/^\.[a-z0-9]+$/.test(extension)) {
-		throw new AppError(
-			"File name must end in a simple extension",
-			BAD_REQUEST,
-			INVALID_INPUT,
-		);
-	}
+	const extension = assertUploadableFileName(fileName);
 
 	const parentDir = await Directory.findOne({
 		_id: parentDirId,
@@ -474,16 +488,15 @@ const createUploadClaim = async (
 };
 
 /**
- * Uploads a file from a server-held stream — Drive import and the cutover
- * script, where the bytes reach the server first so a presigned PUT is not an
- * option. Returns the raw document, key included: every caller is server-side.
+ * Uploads a file from a server-held stream — Drive import, where the bytes
+ * reach the server first so a presigned PUT is not an option. Returns the raw
+ * document, key included: every caller is server-side.
  *
  * @param {string} parentDirId - The ID of the target parent directory
  * @param {string} userId - The owner's ID, for the ownership check
  * @param {string} fileName - The sanitized filename provided by the caller
  * @param {import("node:stream").Readable} fileStream - The bytes to store
- * @param {number} totalStorageLimit - Quota in bytes. Pass
- *   `Number.POSITIVE_INFINITY` to declare an exemption (issue #65)
+ * @param {number} totalStorageLimit - Quota in bytes; must be finite and non-negative
  * @param {number} [perFileCap=MAX_FILE_UPLOAD_SIZE] - Per-file byte ceiling
  *
  * @returns {Promise<Object>} The newly created file document (lean)
@@ -895,6 +908,7 @@ export {
 	MAX_UPLOAD_RESERVATION_MS,
 	getFile,
 	createDownloadUrl,
+	assertUploadableFileName,
 	uploadFileFromServer,
 	updateFile,
 	deleteFile,

@@ -3,7 +3,10 @@
 import path from "node:path";
 import { Readable, pipeline } from "node:stream";
 
-import { uploadFileFromServer } from "./file.service.js";
+import {
+	assertUploadableFileName,
+	uploadFileFromServer,
+} from "./file.service.js";
 import { createDirectory } from "./directory.service.js";
 
 import {
@@ -138,6 +141,9 @@ const streamFileIntoTrove = async (
 		}
 	}
 
+	// Before the download: a rejected name reads no bytes, so the transfer cap never charges it.
+	assertUploadableFileName(displayName);
+
 	const remainingBudget = MAX_DRIVE_IMPORT_SIZE - ctx.totalBytes;
 	const counter = createByteCounter(MAX_FILE_UPLOAD_SIZE, remainingBudget);
 
@@ -153,18 +159,13 @@ const streamFileIntoTrove = async (
 	const counted = pipeline(webStream, counter.stream, () => {});
 
 	try {
-		const uploaded = await uploadFileFromServer(
+		return await uploadFileFromServer(
 			targetParentDirId,
 			ctx.userId,
 			displayName,
 			counted,
-			// Drive import has no quota of its own until issue #65 lands.
-			Number.POSITIVE_INFINITY,
+			ctx.storageLimit,
 		);
-
-		// Only count bytes AFTER a successful upload - failed uploads roll back their bytes
-		ctx.totalBytes += counter.state.bytes;
-		return uploaded;
 	} catch (error) {
 		// The upload can reject before reading a byte, leaving the Drive socket open.
 		counted.destroy();
@@ -177,6 +178,9 @@ const streamFileIntoTrove = async (
 			);
 		}
 		throw error;
+	} finally {
+		// Rejected transfers count too, or a full account could move unbounded bytes in one request.
+		ctx.totalBytes += counter.state.bytes;
 	}
 };
 
@@ -335,19 +339,28 @@ const importItem = async (
 /**
  * Orchestrates a one-shot import of picked Drive items into the authenticated
  * user's tree. Returns a partial-success report; HTTP status is always 200
- * unless the controller-layer input validation fails.
+ * unless the controller-layer input validation fails — per-item errors,
+ * including an unusable `storageLimit`, land in `failed[]`.
  *
  * @param {string} userId
  * @param {string} accessToken - Short-lived Drive token (scope: drive.readonly).
  * @param {Array<{id:string, mimeType:string, name?:string}>} items
  * @param {string} parentDirId - Resolved target directory (controller defaults to user.rootDirId).
+ * @param {number} storageLimit - The user's quota in bytes, enforced per imported file.
  * @returns {Promise<{imported:Array, failed:Array}>}
  */
-const importFromDrive = async (userId, accessToken, items, parentDirId) => {
+const importFromDrive = async (
+	userId,
+	accessToken,
+	items,
+	parentDirId,
+	storageLimit,
+) => {
 	// Context for the batch import - holds state across sequential imports
 	const ctx = {
 		userId,
 		accessToken,
+		storageLimit,
 		totalBytes: 0,
 		imported: [],
 		failed: [],
