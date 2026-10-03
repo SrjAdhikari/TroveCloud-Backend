@@ -223,7 +223,7 @@ const readRange = async (key, start, end) => {
 	}
 };
 
-// Multipart upload for streams of unknown length — Drive import and cutover.
+// Multipart, so it takes streams of unknown length (Drive import) as well as buffers.
 const putObject = async (key, stream, { contentType, cacheControl } = {}) => {
 	const upload = new Upload({
 		client: r2Client,
