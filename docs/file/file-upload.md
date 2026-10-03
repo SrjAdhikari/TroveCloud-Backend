@@ -174,7 +174,7 @@ The limit is passed in from `req.user.storageLimit` on both paths, Drive import 
 
 The quota and its per-category usage breakdown are surfaced to the frontend via `GET /api/storage/usage` — see `../architecture/storage-quota.md`.
 
-> **Note:** Google Drive imports count against this quota per file. An over-quota item lands in the import's `failed[]` with `STORAGE_LIMIT_EXCEEDED` and the rest of the batch continues.
+> **Note:** Google Drive imports count against this quota per file. An over-quota item lands in the import's `failed[]` with `STORAGE_LIMIT_EXCEEDED` and the rest of the batch continues; a regular file whose declared `size` would overrun is rejected before it is downloaded (see `../architecture/storage-quota.md`).
 
 ### Why confirm never releases a reservation
 
