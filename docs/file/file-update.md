@@ -9,7 +9,7 @@ The File update logic adheres to the Controller-Service pattern, with authentica
 - **Authentication (`auth.middleware.js`)**: Applied router-wide via `fileRouter.use(authenticate)`. Every file endpoint requires a valid session — unauthenticated requests are rejected before reaching any controller.
 - **Middleware (`validate.middleware.js`)**: `validateId` is registered via `router.param()` on `id` (ObjectId format check), and `validateBody(renameFileSchema)` validates + sanitizes the body — both run before the request reaches the controller.
 - **Controller (`file.controller.js`)**: Extracts route parameters and the already-validated request body, delegates to the Service layer. Contains zero business logic or database access.
-- **Service (`file.service.js`)**: Performs an atomic ownership-scoped rename.
+- **Service (`src/services/file/file.service.js`)**: Performs an atomic ownership-scoped rename.
 
 ---
 

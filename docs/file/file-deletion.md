@@ -11,7 +11,7 @@ The File deletion logic adheres to the Controller-Service pattern, with authenti
 - **Authentication (`auth.middleware.js`)**: Applied router-wide via `fileRouter.use(authenticate)`. Every file endpoint requires a valid session — unauthenticated requests are rejected before reaching any controller.
 - **Middleware (`validate.middleware.js`)**: `validateId` is registered via `router.param()` on `id`. Validates MongoDB ObjectId format using `isValidObjectId`, throwing a `BAD_REQUEST` error before the request reaches the controller.
 - **Controller (`file.controller.js`)**: Extracts route parameters, delegates to the Service layer. Contains zero business logic or database access.
-- **Service (`file.service.js`)**: Verifies ownership, deletes the DB record and decrements the parent folders' denormalized sizes in a transaction, then removes the stored object from R2.
+- **Service (`src/services/file/file.service.js`)**: Verifies ownership, deletes the DB record and decrements the parent folders' denormalized sizes in a transaction, then removes the stored object from R2.
 - **R2 library (`src/lib/r2.js`)**: Owns the S3 client and the legal key shapes. `deleteObject` is the only way this path reaches Cloudflare.
 
 ---
