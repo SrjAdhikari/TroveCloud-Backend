@@ -3,13 +3,10 @@
 import path from "node:path";
 import { Readable, pipeline } from "node:stream";
 
-import {
-	assertUploadableFileName,
-	getStoredBytes,
-	isValidStorageLimit,
-	settleExpiredPendingFiles,
-	uploadFileFromServer,
-} from "./file.service.js";
+import { settleExpiredPendingFiles } from "./file/expirySweep.service.js";
+import { getStoredBytes, isValidStorageLimit } from "./file/quota.service.js";
+import { assertUploadableFileName } from "./file/upload.service.js";
+import { uploadFileFromServer } from "./file/serverUpload.service.js";
 import { createDirectory } from "./directory.service.js";
 
 import {

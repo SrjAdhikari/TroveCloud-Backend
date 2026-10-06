@@ -10,10 +10,12 @@ import {
 	resolveDirectoryNames,
 } from "../../src/services/directory.service.js";
 import {
-	uploadFileFromServer,
 	initiateUpload,
 	confirmUpload,
-} from "../../src/services/file.service.js";
+} from "../../src/services/file/upload.service.js";
+import {
+	uploadFileFromServer,
+} from "../../src/services/file/serverUpload.service.js";
 import { deleteObject, getObjectMetadata } from "../../src/lib/r2.js";
 import Directory from "../../src/models/directory.model.js";
 import File from "../../src/models/file.model.js";

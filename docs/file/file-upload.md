@@ -13,7 +13,7 @@ The File upload logic adheres to the Controller-Service pattern, with authentica
 - **Authentication (`src/middlewares/auth.middleware.js`)**: Applied router-wide via `fileRouter.use(authenticate)`. Every file endpoint requires a valid session — unauthenticated requests are rejected before reaching any controller.
 - **Middleware (`src/middlewares/validate.middleware.js`)**: `validateId` is registered via `router.param()` on both `id` and `parentDirId`. `validateBody(initiateUploadSchema)` validates and sanitises the request body before the controller runs.
 - **Controller (`src/controllers/file.controller.js`)**: Extracts route parameters and body fields, delegates to the Service layer. Contains zero business logic or database access.
-- **Service (`src/services/file.service.js`)**: Verifies parent-directory ownership, generates the object key, enforces the quota inside a transaction, presigns the upload URL, later verifies the stored object before promoting the file, and on cancel shortens the reservation window instead of refunding it.
+- **Service (`src/services/file/upload.service.js`)**: Verifies parent-directory ownership, generates the object key, enforces the quota inside a transaction, presigns the upload URL, later verifies the stored object before promoting the file, and on cancel shortens the reservation window instead of refunding it.
 - **R2 library (`src/lib/r2.js`)**: Owns the S3 client, the legal key shapes, and the presign helpers. No other module talks to Cloudflare directly.
 
 ---

@@ -16,10 +16,10 @@ import {
 	hardDeleteUser,
 	restoreUser,
 } from "../../../src/services/admin/user.service.js";
+import { initiateUpload } from "../../../src/services/file/upload.service.js";
 import {
 	uploadFileFromServer,
-	initiateUpload,
-} from "../../../src/services/file.service.js";
+} from "../../../src/services/file/serverUpload.service.js";
 import { uploadProfilePicture } from "../../../src/services/user.service.js";
 import { deleteObject, getObjectMetadata } from "../../../src/lib/r2.js";
 

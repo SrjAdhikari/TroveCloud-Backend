@@ -21,7 +21,9 @@ import {
 	scanForOrphans,
 	reclaimOrphans,
 } from "../src/services/reconcile.service.js";
-import { MAX_UPLOAD_RESERVATION_MS } from "../src/services/file.service.js";
+import {
+	MAX_UPLOAD_RESERVATION_MS,
+} from "../src/services/file/reservation.service.js";
 import envConfig from "../src/constants/env.js";
 import { ONE_DAY_MS, ONE_HOUR_MS, ONE_MINUTE_MS } from "../src/utils/date.js";
 

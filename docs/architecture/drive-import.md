@@ -125,7 +125,7 @@ Internal helpers:
 - `sanitizeDirName(name)` — trims, strips control chars, pads names shorter than 3 chars with `_` suffix, truncates over 50, falls back to `"Imported folder"` if empty. Needed because `Directory.name` has `minlength: 3, maxlength: 50` but Drive folder names aren't bounded.
 - `sanitizeFileName(name)` — same treatment against `File.name` constraints (no minlength today; still strip control chars and cap at 255, matching the existing `file.controller.js` sanitization).
 
-**Streaming through the server:** Drive's response body arrives as a Web ReadableStream. It is wrapped in a `Transform` that counts bytes and aborts the pipeline when the post-hoc total exceeds the per-file cap or the remaining per-request budget — necessary because Google-native `export` responses have no pre-flight `size`. The counter-wrapped Readable is then passed to the existing `uploadFileFromServer(parentDirId, userId, displayName, readable, totalStorageLimit)` in `src/services/file.service.js` with the user's `storageLimit`, which handles the DB row creation, the write to R2, the quota check against the counted bytes, and rollback (row and object) when the stream or the quota check fails.
+**Streaming through the server:** Drive's response body arrives as a Web ReadableStream. It is wrapped in a `Transform` that counts bytes and aborts the pipeline when the post-hoc total exceeds the per-file cap or the remaining per-request budget — necessary because Google-native `export` responses have no pre-flight `size`. The counter-wrapped Readable is then passed to the existing `uploadFileFromServer(parentDirId, userId, displayName, readable, totalStorageLimit)` in `src/services/file/serverUpload.service.js` with the user's `storageLimit`, which handles the DB row creation, the write to R2, the quota check against the counted bytes, and rollback (row and object) when the stream or the quota check fails.
 
 **`src/validators/drive.validator.js`** — request-body validation.
 
@@ -186,7 +186,7 @@ Existing code leveraged by the implementation — no duplication.
 
 | What's needed                                                                        | Existing function                                       | Location                              |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------- | ------------------------------------- |
-| Stream bytes to object storage with rollback                                         | `uploadFileFromServer(parentDirId, userId, fileName, fileStream, totalStorageLimit)` | `src/services/file.service.js`        |
+| Stream bytes to object storage with rollback                                         | `uploadFileFromServer(parentDirId, userId, fileName, fileStream, totalStorageLimit)` | `src/services/file/serverUpload.service.js` |
 | Create a directory with parent-ownership check                                       | `createDirectory(parentDirId, dirname, userId)`         | `src/services/directory.service.js`   |
 | Session-based auth, attach `req.user`                                                | `authenticate` middleware                               | `src/middlewares/auth.middleware.js`  |
 | Raw-fetch third-party API pattern (timeout, UA, `response.ok`, AppError passthrough) | `verifyGithubCodeAndFetchProfile`                       | `src/lib/githubAuth.js`               |
@@ -264,7 +264,7 @@ These are deliberately out of scope for the initial implementation. Each represe
 
 ## 📎 Critical Files Referenced
 
-- `src/services/file.service.js` — `uploadFileFromServer` reused.
+- `src/services/file/serverUpload.service.js` — `uploadFileFromServer` reused.
 - `src/services/directory.service.js` — `createDirectory` reused.
 - `src/lib/githubAuth.js` — structural template for `googleDrive.js`.
 - `src/middlewares/auth.middleware.js` — `authenticate` reused.

@@ -13,7 +13,7 @@ The File retrieval logic adheres to the Controller-Service pattern, with authent
 - **Authentication (`src/middlewares/auth.middleware.js`)**: Applied router-wide via `fileRouter.use(authenticate)`. Every file endpoint requires a valid session — unauthenticated requests are rejected before reaching any controller.
 - **Middleware (`src/middlewares/validate.middleware.js`)**: `validateId` is registered via `router.param()` on `id`. Validates MongoDB ObjectId format using `isValidObjectId`, throwing a `BAD_REQUEST` error before the request reaches the controller.
 - **Controller (`src/controllers/file.controller.js`)**: Extracts route parameters and query flags, delegates to the Service layer, and wraps the result in the standard response envelope. Contains zero business logic or database access.
-- **Service (`src/services/file.service.js`)**: Executes ownership-scoped database queries and, for downloads, presigns a `GET` against the stored object key.
+- **Service (`src/services/file/file.service.js`)**: Executes ownership-scoped database queries and, for downloads, presigns a `GET` against the stored object key.
 
 ---
 
