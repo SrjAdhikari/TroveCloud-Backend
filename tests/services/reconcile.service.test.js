@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 
 // Workers share one real dev bucket, so a real scan would read another worker's
 // live objects as orphans. Only the two bucket-wide calls are faked; the rest of
-// the module stays real — the key patterns and the TTL file.service derives its
+// the module stays real — the key patterns and the TTL reservation.service derives its
 // reservation ceiling from must be the shipped ones.
 vi.mock("../../src/lib/r2.js", async (importOriginal) => ({
 	...(await importOriginal()),
@@ -24,7 +24,9 @@ import {
 	scanForOrphans,
 	reclaimOrphans,
 } from "../../src/services/reconcile.service.js";
-import { MAX_UPLOAD_RESERVATION_MS } from "../../src/services/file.service.js";
+import {
+	MAX_UPLOAD_RESERVATION_MS,
+} from "../../src/services/file/reservation.service.js";
 import { ONE_MINUTE_MS } from "../../src/utils/date.js";
 
 import File from "../../src/models/file.model.js";

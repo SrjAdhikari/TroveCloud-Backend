@@ -2,7 +2,7 @@
 
 import Directory from "../models/directory.model.js";
 import File from "../models/file.model.js";
-import { settleExpiredPendingFiles } from "./file.service.js";
+import { settleExpiredPendingFiles } from "./file/expirySweep.service.js";
 
 import {
 	categorizeExtension,

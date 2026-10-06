@@ -4,17 +4,25 @@ import mongoose from "mongoose";
 
 import {
 	MIN_UPLOAD_BYTES_PER_SECOND,
-	MAX_EXPIRED_FILES_PER_SWEEP,
 	MAX_UPLOAD_RESERVATION_MS,
-	getFile,
-	createDownloadUrl,
-	deleteFile,
-	uploadFileFromServer,
-	updateFile,
+} from "../../src/services/file/reservation.service.js";
+import {
+	MAX_EXPIRED_FILES_PER_SWEEP,
+} from "../../src/services/file/expirySweep.service.js";
+import {
 	initiateUpload,
 	confirmUpload,
 	cancelUpload,
-} from "../../src/services/file.service.js";
+} from "../../src/services/file/upload.service.js";
+import {
+	uploadFileFromServer,
+} from "../../src/services/file/serverUpload.service.js";
+import {
+	getFile,
+	createDownloadUrl,
+	deleteFile,
+	updateFile,
+} from "../../src/services/file/file.service.js";
 import envConfig from "../../src/constants/env.js";
 
 const { MAX_FILE_UPLOAD_SIZE } = envConfig;

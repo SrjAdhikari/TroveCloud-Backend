@@ -1,14 +1,16 @@
 //* src/controllers/file.controller.js
 
 import {
-	getFile,
-	createDownloadUrl,
 	initiateUpload,
 	confirmUpload,
 	cancelUpload,
+} from "../services/file/upload.service.js";
+import {
+	getFile,
+	createDownloadUrl,
 	updateFile,
 	deleteFile,
-} from "../services/file.service.js";
+} from "../services/file/file.service.js";
 
 import httpStatus from "../constants/httpStatus.js";
 

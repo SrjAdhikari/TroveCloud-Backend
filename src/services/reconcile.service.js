@@ -11,7 +11,7 @@ import {
 	FILE_KEY_PATTERN,
 	PROFILE_PICTURE_KEY_PATTERN,
 } from "../lib/r2.js";
-import { MAX_UPLOAD_RESERVATION_MS } from "./file.service.js";
+import { MAX_UPLOAD_RESERVATION_MS } from "./file/reservation.service.js";
 
 import httpStatus from "../constants/httpStatus.js";
 import appErrorCode from "../constants/appErrorCode.js";

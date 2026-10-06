@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { Readable } from "node:stream";
 
 import { getSystemOverview } from "../../../src/services/admin/overview.service.js";
+import { initiateUpload } from "../../../src/services/file/upload.service.js";
 import {
 	uploadFileFromServer,
-	initiateUpload,
-} from "../../../src/services/file.service.js";
+} from "../../../src/services/file/serverUpload.service.js";
 
 import { createTestUser, createTestDirectory } from "../../factories.js";
 
