@@ -118,7 +118,7 @@ Single source of truth — the timestamps. Status is computed on the fly for API
 | Admin overview controller | `src/controllers/admin/overview.controller.js` | New | Overview handler |
 | Admin user service | `src/services/admin/user.service.js` | New | Business logic for user admin actions + cascades |
 | Admin overview service | `src/services/admin/overview.service.js` | New | System-wide aggregations (counts, totals, recent-signup window) |
-| Storage cleanup helper | (reuse existing if present, else `src/utils/storage.cleanup.js`) | Reuse / New | Wipes a user's physical files from disk during purge. Reuse whatever `file.service.js` uses for delete today; do not reinvent. |
+| Storage cleanup helper | (reuse existing if present, else `src/utils/storage.cleanup.js`) | Reuse / New | Wipes a user's physical files from disk during purge. Reuse whatever `src/services/file/file.service.js` uses for delete today; do not reinvent. |
 | App error codes | `src/constants/appErrorCode.js` | Modified | Add `ACCOUNT_SUSPENDED`, `CANNOT_ACT_ON_SELF`, `CANNOT_ACT_ON_PEER`, `LAST_SUPERADMIN`, `INSUFFICIENT_ROLE`. `ACCESS_DENIED` already exists. |
 | Seed script | `scripts/seed-superadmin.js` | New | CLI: backfill missing `role`/`suspendedAt`/`deletedAt` fields, then promote target user to superadmin |
 | `package.json` | `package.json` | Modified | Add `"seed:superadmin": "node scripts/seed-superadmin.js"` |
@@ -221,7 +221,7 @@ Hard delete. Irreversible. Removes user + all their data from DB and disk.
      - `File.deleteMany({ userId })`
      - `Directory.deleteMany({ userId })`
      - `User.deleteOne({ _id: userId })`
-  2. **After commit:** delete the user's physical files from disk via the existing file-deletion utility used by `file.service.js`. If disk delete fails: log a warning, leave orphans for manual cleanup (DB is source of truth).
+  2. **After commit:** delete the user's physical files from disk via the existing file-deletion utility used by `src/services/file/file.service.js`. If disk delete fails: log a warning, leave orphans for manual cleanup (DB is source of truth).
 - **Response:** `{ filesDeleted, directoriesDeleted, bytesFreed }` (tallied during the transaction so the response itself gives the admin a confirmation of what was wiped).
 
 ### `POST /api/admin/users/:id/restore` — **superadmin only**
