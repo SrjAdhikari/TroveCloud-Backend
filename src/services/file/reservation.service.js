@@ -11,8 +11,12 @@ import { FIFTEEN_MINUTES_MS, ONE_HOUR_MS } from "../../utils/date.js";
 
 const MIN_UPLOAD_BYTES_PER_SECOND = 16_000;
 
+// Shortest and longest time an upload is given to finish, on top of the upload link's lifetime.
+const UPLOAD_WINDOW_MS = FIFTEEN_MINUTES_MS;
+const UPLOAD_WINDOW_MAX_MS = ONE_HOUR_MS;
+
 // The maximum time a pending upload can be reserved against the user's quota.
-const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + ONE_HOUR_MS;
+const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + UPLOAD_WINDOW_MAX_MS;
 
 const isUploadStillLive = (file) =>
 	file.status !== "ready" &&
@@ -25,7 +29,7 @@ const calculateUploadExpiry = (declaredSize) => {
 	return new Date(
 		Date.now() +
 			UPLOAD_URL_TTL_SECONDS * 1000 +
-			Math.min(ONE_HOUR_MS, Math.max(FIFTEEN_MINUTES_MS, transferMs)),
+			Math.min(UPLOAD_WINDOW_MAX_MS, Math.max(UPLOAD_WINDOW_MS, transferMs)),
 	);
 };
 
@@ -84,6 +88,8 @@ const removeObject = async (objectKey, fileId) => {
 export {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_UPLOAD_RESERVATION_MS,
+	UPLOAD_WINDOW_MS,
+	UPLOAD_WINDOW_MAX_MS,
 	isUploadStillLive,
 	calculateUploadExpiry,
 	releaseReservedBytes,

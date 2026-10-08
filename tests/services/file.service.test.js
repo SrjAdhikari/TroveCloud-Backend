@@ -5,6 +5,8 @@ import mongoose from "mongoose";
 import {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_UPLOAD_RESERVATION_MS,
+	UPLOAD_WINDOW_MS,
+	UPLOAD_WINDOW_MAX_MS,
 } from "../../src/services/file/reservation.service.js";
 import {
 	MAX_EXPIRED_FILES_PER_SWEEP,
@@ -37,8 +39,6 @@ import File from "../../src/models/file.model.js";
 import Directory from "../../src/models/directory.model.js";
 import {
 	ONE_MINUTE_MS,
-	FIFTEEN_MINUTES_MS,
-	ONE_HOUR_MS,
 } from "../../src/utils/date.js";
 
 import {
@@ -982,6 +982,12 @@ describe("updateFile scopes renames to ready files", () => {
 });
 
 describe("initiateUpload", () => {
+	it("keeps the reservation floor longer than the presign TTL and below the cap", () => {
+		// The upload record must last longer than the upload link, or a late upload has no record.
+		expect(UPLOAD_WINDOW_MS).toBeGreaterThan(UPLOAD_URL_TTL_SECONDS * 1000);
+		expect(UPLOAD_WINDOW_MAX_MS).toBeGreaterThan(UPLOAD_WINDOW_MS);
+	});
+
 	it("reserves the declared bytes and returns a presigned PUT", async () => {
 		const user = await createTestUser();
 		const dir = await createTestDirectory(user._id);
@@ -1071,7 +1077,7 @@ describe("initiateUpload", () => {
 
 		// The size whose transfer estimate lands exactly on the 1-hour clamp, so
 		// anything above it is clamped rather than sized by the transfer.
-		const ceilingSize = (ONE_HOUR_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
+		const ceilingSize = (UPLOAD_WINDOW_MAX_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
 
 		const before = Date.now();
 		const small = await initiateUpload(dir._id, user._id, "small.txt", 100, 10 ** 9);
@@ -1093,14 +1099,14 @@ describe("initiateUpload", () => {
 
 		// Invariant 1: a PUT may START as late as mint + presign TTL, so every
 		// window covers the TTL *plus* the expected transfer time.
-		expect(smallWindow).toBeGreaterThanOrEqual(ttlMs + FIFTEEN_MINUTES_MS);
-		expect(midWindow).toBeGreaterThan(ttlMs + FIFTEEN_MINUTES_MS);
-		expect(midWindow).toBeLessThan(ttlMs + ONE_HOUR_MS);
+		expect(smallWindow).toBeGreaterThanOrEqual(ttlMs + UPLOAD_WINDOW_MS);
+		expect(midWindow).toBeGreaterThan(ttlMs + UPLOAD_WINDOW_MS);
+		expect(midWindow).toBeLessThan(ttlMs + UPLOAD_WINDOW_MAX_MS);
 
 		// The ceiling is reachable and really does bound the window, rather than
 		// being dead code no declared size ever reaches.
-		expect(largeWindow).toBeGreaterThanOrEqual(ttlMs + ONE_HOUR_MS);
-		expect(largeWindow).toBeLessThan(ttlMs + ONE_HOUR_MS + 10_000);
+		expect(largeWindow).toBeGreaterThanOrEqual(ttlMs + UPLOAD_WINDOW_MAX_MS);
+		expect(largeWindow).toBeLessThan(ttlMs + UPLOAD_WINDOW_MAX_MS + 10_000);
 	});
 
 	it("never lets a reservation deadline outrun MAX_UPLOAD_RESERVATION_MS", async () => {
@@ -1109,7 +1115,7 @@ describe("initiateUpload", () => {
 
 		// Past this declared size the transfer estimate pins the 1-hour clamp, so
 		// the per-file cap above it is the worst case the formula can produce.
-		const ceilingSize = (ONE_HOUR_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
+		const ceilingSize = (UPLOAD_WINDOW_MAX_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
 		expect(MAX_FILE_UPLOAD_SIZE).toBeGreaterThan(ceilingSize);
 
 		const before = Date.now();
@@ -1148,7 +1154,7 @@ describe("initiateUpload", () => {
 		// Not strict: mint and `after` can land in the same millisecond, and the
 		// suite's determinism is a held property.
 		expect(deadline).toBeLessThanOrEqual(
-			after + MAX_UPLOAD_RESERVATION_MS - (ONE_HOUR_MS - FIFTEEN_MINUTES_MS),
+			after + MAX_UPLOAD_RESERVATION_MS - (UPLOAD_WINDOW_MAX_MS - UPLOAD_WINDOW_MS),
 		);
 	});
 
