@@ -49,7 +49,7 @@ const userSchema = new Schema(
 		profilePictureKey: {
 			type: String,
 			default: null,
-			match: /^profile-pictures\/[a-f0-9]{24}\/[a-f0-9]{32}$/,
+			match: /^profile-pictures\/[a-f0-9]{24}-[a-f0-9]{32}$/,
 		},
 		provider: {
 			type: String,

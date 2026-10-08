@@ -39,7 +39,7 @@ const userSchema = {
 			},
 			profilePictureKey: {
 				bsonType: ["string", "null"],
-				pattern: "^profile-pictures/[a-f0-9]{24}/[a-f0-9]{32}$",
+				pattern: "^profile-pictures/[a-f0-9]{24}-[a-f0-9]{32}$",
 				description: "R2 object key for a self-hosted profile picture, or null",
 			},
 			provider: {

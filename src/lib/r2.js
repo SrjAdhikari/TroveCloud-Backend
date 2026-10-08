@@ -74,7 +74,7 @@ const FILE_KEY_PATTERN = new RegExp(
 	`^${FILE_PREFIX}/[a-f0-9]{24}-[a-f0-9]{32}(\\.[a-z0-9]+)?$`,
 );
 const PROFILE_PICTURE_KEY_PATTERN = new RegExp(
-	`^${PROFILE_PICTURE_PREFIX}/[a-f0-9]{24}/[a-f0-9]{32}$`,
+	`^${PROFILE_PICTURE_PREFIX}/[a-f0-9]{24}-[a-f0-9]{32}$`,
 );
 
 const invalidKey = () =>
@@ -115,7 +115,7 @@ const buildProfilePictureKey = (userId, token) => {
 	if (typeof token !== "string" || !NONCE_PATTERN.test(token))
 		throw invalidKey();
 
-	return assertKey(`${PROFILE_PICTURE_PREFIX}/${owner}/${token}`);
+	return assertKey(`${PROFILE_PICTURE_PREFIX}/${owner}-${token}`);
 };
 
 // Both fields are mandatory: omitting the length does not error, it drops

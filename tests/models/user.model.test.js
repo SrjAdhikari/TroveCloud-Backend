@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 
 import { createTestUser } from "../factories.js";
 import User from "../../src/models/user.model.js";
+import userSchema from "../../src/schemas/user.schema.js";
+import { PROFILE_PICTURE_KEY_PATTERN } from "../../src/lib/r2.js";
 
 describe("user.model — name length bounds", () => {
 	it("accepts a name shorter than 3 characters (e.g. an OAuth display name)", async () => {
@@ -21,11 +23,21 @@ describe("user.model — name length bounds", () => {
 });
 
 describe("user.model — profilePictureKey", () => {
-	const KEY = (id) => `profile-pictures/${id}/${"a".repeat(32)}`;
+	const KEY = (id) => `profile-pictures/${id}-${"a".repeat(32)}`;
 
 	it("defaults to null", async () => {
 		const user = await createTestUser();
 		expect(user.profilePictureKey).toBeNull();
+	});
+
+	// Three hand-copied regexes: a drift here lets one layer accept what another rejects.
+	it("matches the R2 key pattern in Mongoose and the Atlas mirror", () => {
+		const expected = PROFILE_PICTURE_KEY_PATTERN.source.replaceAll("\\/", "/");
+		const mongoose = User.schema.path("profilePictureKey").options.match;
+		const atlas = userSchema.$jsonSchema.properties.profilePictureKey.pattern;
+
+		expect(mongoose.source.replaceAll("\\/", "/")).toBe(expected);
+		expect(atlas).toBe(expected);
 	});
 
 	it("stores an R2 object key", async () => {
@@ -40,6 +52,22 @@ describe("user.model — profilePictureKey", () => {
 	it("rejects a key outside the profile-pictures prefix", async () => {
 		const user = await createTestUser();
 		user.profilePictureKey = `files/${"a".repeat(24)}-${"b".repeat(32)}.pdf`;
+		await expect(user.save()).rejects.toThrow();
+	});
+
+	it("rejects the old nested key shape", async () => {
+		const user = await createTestUser();
+		user.profilePictureKey = `profile-pictures/${user._id}/${"a".repeat(32)}`;
+		await expect(user.save()).rejects.toThrow();
+	});
+
+	it.each([
+		["an uppercase nonce", "A".repeat(32)],
+		["a short nonce", "a".repeat(31)],
+		["a trailing extension", `${"a".repeat(32)}.png`],
+	])("rejects %s", async (_label, nonce) => {
+		const user = await createTestUser();
+		user.profilePictureKey = `profile-pictures/${user._id}-${nonce}`;
 		await expect(user.save()).rejects.toThrow();
 	});
 
