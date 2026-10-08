@@ -33,8 +33,7 @@ import {
 } from "../../factories.js";
 
 // A hard delete removes the document that names the key, so `tests/setup.js`
-// can no longer find it. try/catch around the whole call, never `.catch()`:
-// `assertKey` inside `deleteObject` throws synchronously (invariant 3).
+// can no longer find it. A broken key makes the delete fail, which is caught.
 const PNG = Buffer.concat([
 	Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
 	Buffer.alloc(56, 1),

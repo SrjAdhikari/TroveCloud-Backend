@@ -46,8 +46,8 @@ const uploadInto = async (parentId, userId, name, body, storageLimit = 10 ** 9) 
 };
 
 // Belt and braces: deleteDirectory removes the objects itself, so this only
-// matters when a test asserts before the delete. try/catch around the whole
-// call, never `.catch()`: `assertKey` throws synchronously (invariant 3).
+// matters when a test checks before the delete. A broken key makes the delete
+// fail, which is caught.
 const discard = async (file) => {
 	try {
 		await deleteObject(file.objectKey);

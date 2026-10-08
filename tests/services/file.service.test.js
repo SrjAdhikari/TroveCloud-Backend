@@ -72,8 +72,7 @@ const objectExists = async (key) => Boolean(await getObjectMetadata(key));
 afterEach(async () => {
 	await Promise.allSettled(
 		[...createdKeys].map(async (key) => {
-			// try/catch around the whole call — `assertKey` inside `deleteObject`
-			// throws synchronously for a malformed key, which `.catch()` misses.
+			// A broken key makes the delete fail, which is caught.
 			try {
 				await deleteObject(key);
 			} catch {}

@@ -18,7 +18,7 @@ export const cleanupTestObjects = async () => {
 
 	await Promise.allSettled(
 		keys.map(async (key) => {
-			// try/catch, not `.catch()` — `assertKey` throws synchronously.
+			// A broken key makes the delete fail; ignore it, this is only cleanup.
 			try {
 				await deleteObject(key);
 			} catch {}
