@@ -46,7 +46,7 @@ const validateBody = (schema) => (req, res, next) => {
  */
 const validateId = (req, res, next, id) => {
 	if (!isValidObjectId(id)) {
-		throw new AppError(`Invalid ID format: ${id}`, BAD_REQUEST, INVALID_ID);
+		throw new AppError("Invalid ID format", BAD_REQUEST, INVALID_ID);
 	}
 
 	next();

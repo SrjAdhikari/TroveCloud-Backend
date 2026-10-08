@@ -106,4 +106,17 @@ describe("validateId param callback", () => {
 		}
 		expect(next).not.toHaveBeenCalled();
 	});
+
+	it("does not echo the raw id in the error message", () => {
+		const input = "<script>alert(1)</script>";
+		const { invoke } = runId(input);
+
+		expect(invoke).toThrow(AppError);
+		try {
+			invoke();
+		} catch (err) {
+			expect(err.message).toBe("Invalid ID format");
+			expect(err.message).not.toContain(input);
+		}
+	});
 });
