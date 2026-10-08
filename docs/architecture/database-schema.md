@@ -116,7 +116,7 @@ Source: `src/models/directory.model.js`. Atlas mirror: `src/schemas/directories.
 
 **Self-reference**
 
-`parentDirId` points at another `Directory._id` — or `null` for the root. Recursive listing uses MongoDB's `$graphLookup` with a max depth of 20.
+`parentDirId` points at another `Directory._id` — or `null` for the root. Each directory also stores `ancestorIds` (root down to its parent), which breadcrumbs and subtree lookups use instead of walking the tree.
 
 ---
 
@@ -203,7 +203,7 @@ The refs in one place:
 
 **Cascading deletes** are handled in two places:
 
-- `directory.service.js`'s recursive delete walks the tree via `$graphLookup`, deletes directory + file rows inside a transaction, and drops their R2 objects outside with `removeObjects` (batched, never throws).
+- `directory.service.js`'s delete collects the folder and everything under it with one `ancestorIds` query scoped to the user, deletes directory + file rows inside a transaction, and drops their R2 objects outside with `removeObjects` (batched, never throws).
 - `admin/user.service.js`'s `hardDeleteUser` wipes `Session`, `File`, `Directory`, and `User` rows in one transaction, with the same outside-the-transaction `removeObjects` call for object cleanup. See `transaction-patterns.md` for the "not-retry-safe work stays out" rule.
 
 ---

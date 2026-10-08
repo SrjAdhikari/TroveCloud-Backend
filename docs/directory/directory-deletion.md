@@ -85,7 +85,7 @@ Object deletion happens **after** the DB transaction succeeds. This ordering ens
 
 ### `removeObjects` for Object Cleanup
 
-`removeObjects` (`src/services/file/objectCleanup.service.js`) never throws. Keys that are not valid storage keys are skipped with a warning. The rest go to R2 in requests of up to 1000 keys, each batch on its own, so a failed batch doesn't stop the later ones. Warnings carry a label and an error code, never the key.
+`removeObjects` (`src/services/file/objectCleanup.service.js`) never throws. Keys that are not valid storage keys are skipped with a warning. The rest go to R2 in requests of up to 1000 keys, each batch on its own, so a failed batch doesn't stop the later ones. Warnings never include the key: a skipped key names its label, a failed object names its label and error code, and a failed batch gives its size, error name and status.
 
 ---
 
