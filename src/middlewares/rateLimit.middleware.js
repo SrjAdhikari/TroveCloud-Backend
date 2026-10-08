@@ -45,7 +45,6 @@ const RATE_LIMITS = {
 	global: { windowMs: FIFTEEN_MINUTES_MS, limit: 1000 },
 	auth: { windowMs: FIFTEEN_MINUTES_MS, limit: 10 },
 	oauth: { windowMs: FIFTEEN_MINUTES_MS, limit: 20 },
-	publicRead: { windowMs: FIFTEEN_MINUTES_MS, limit: 60 },
 	read: { windowMs: FIFTEEN_MINUTES_MS, limit: 100 },
 	mutation: { windowMs: FIFTEEN_MINUTES_MS, limit: 40 },
 	destructive: { windowMs: FIFTEEN_MINUTES_MS, limit: 15 },
@@ -67,7 +66,6 @@ const createLimiter = ({ windowMs, limit }) =>
 const globalLimiter = createLimiter(RATE_LIMITS.global);
 const authLimiter = createLimiter(RATE_LIMITS.auth);
 const oauthLimiter = createLimiter(RATE_LIMITS.oauth);
-const publicReadLimiter = createLimiter(RATE_LIMITS.publicRead);
 const readLimiter = createLimiter(RATE_LIMITS.read);
 const mutationLimiter = createLimiter(RATE_LIMITS.mutation);
 const destructiveLimiter = createLimiter(RATE_LIMITS.destructive);
@@ -81,7 +79,6 @@ export {
 	globalLimiter,
 	authLimiter,
 	oauthLimiter,
-	publicReadLimiter,
 	readLimiter,
 	mutationLimiter,
 	destructiveLimiter,

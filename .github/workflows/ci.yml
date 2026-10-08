@@ -25,7 +25,6 @@ jobs:
       PORT: 5001
       NODE_ENV: test
       APP_ORIGIN: http://localhost:5173
-      API_URL: http://localhost:5001
 
       # Never dialled — the suite boots its own in-memory replica set.
       MONGODB_URI: mongodb://127.0.0.1:27017/unused
