@@ -46,8 +46,8 @@ const uploadInto = async (parentId, userId, name, body, storageLimit = 10 ** 9) 
 };
 
 // Belt and braces: deleteDirectory removes the objects itself, so this only
-// matters when a test asserts before the delete. try/catch around the whole
-// call, never `.catch()`: `assertKey` throws synchronously (invariant 3).
+// matters when a test checks before the delete. A broken key makes the delete
+// fail, which is caught.
 const discard = async (file) => {
 	try {
 		await deleteObject(file.objectKey);
@@ -700,9 +700,8 @@ describe("deleteDirectory removes the subtree's stored objects", () => {
 		track(bad.objectKey);
 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-		// Written through the driver to bypass schema validation: `assertKey`
-		// throws synchronously inside the loop and the run must survive it.
+		// Saved directly to the database so the broken key gets past the usual
+		// checks; the folder delete should skip it and still remove the other files.
 		const leakyNonce = "a".repeat(32);
 		await File.collection.updateOne(
 			{ _id: bad._id },

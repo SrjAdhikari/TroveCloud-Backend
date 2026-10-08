@@ -31,7 +31,6 @@ const envConfig = Object.freeze({
 	PORT: getEnv("PORT"),
 	NODE_ENV: getEnv("NODE_ENV"),
 	APP_ORIGIN: getEnv("APP_ORIGIN"),
-	API_URL: getEnv("API_URL"),
 	MONGODB_URI: getEnv("MONGODB_URI"),
 	GOOGLE_CLIENT_ID: getEnv("GOOGLE_CLIENT_ID"),
 	GITHUB_CLIENT_ID: getEnv("GITHUB_CLIENT_ID"),

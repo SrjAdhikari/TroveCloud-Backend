@@ -5,6 +5,8 @@ import mongoose from "mongoose";
 import {
 	MIN_UPLOAD_BYTES_PER_SECOND,
 	MAX_UPLOAD_RESERVATION_MS,
+	UPLOAD_WINDOW_MS,
+	UPLOAD_WINDOW_MAX_MS,
 } from "../../src/services/file/reservation.service.js";
 import {
 	MAX_EXPIRED_FILES_PER_SWEEP,
@@ -37,8 +39,6 @@ import File from "../../src/models/file.model.js";
 import Directory from "../../src/models/directory.model.js";
 import {
 	ONE_MINUTE_MS,
-	FIFTEEN_MINUTES_MS,
-	ONE_HOUR_MS,
 } from "../../src/utils/date.js";
 
 import {
@@ -72,8 +72,7 @@ const objectExists = async (key) => Boolean(await getObjectMetadata(key));
 afterEach(async () => {
 	await Promise.allSettled(
 		[...createdKeys].map(async (key) => {
-			// try/catch around the whole call — `assertKey` inside `deleteObject`
-			// throws synchronously for a malformed key, which `.catch()` misses.
+			// A broken key makes the delete fail, which is caught.
 			try {
 				await deleteObject(key);
 			} catch {}
@@ -815,6 +814,54 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 		expect(await objectExists(claimed.objectKey)).toBe(false);
 		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
 	});
+
+	it("logs the failure cause, without the object key, when the stream fails mid-upload", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		let claimed = null;
+		const snapshot = claimOf(user);
+		const source = new Readable({
+			read() {
+				snapshot()
+					.then((doc) => {
+						claimed = doc;
+						this.destroy(Object.assign(new Error("boom"), { name: "BoomError" }));
+					})
+					.catch((err) => this.destroy(err));
+			},
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "torn.txt", source, 10 ** 9),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+		createdKeys.add(claimed.objectKey);
+
+		const logged = warn.mock.calls.flat().join("\n");
+		expect(logged).toContain(String(claimed._id));
+		expect(logged).toContain("BoomError");
+		expect(logged).not.toContain(claimed.objectKey);
+	});
+
+	it("does not warn when the byte cap trips", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"huge.bin",
+				Readable.from([Buffer.alloc(1024)]),
+				10 ** 9,
+				{ perFileCap: 512 },
+			),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
+
+		expect(warn).not.toHaveBeenCalled();
+	});
 });
 
 describe("deleteFile maintains folder sizes", () => {
@@ -982,6 +1029,12 @@ describe("updateFile scopes renames to ready files", () => {
 });
 
 describe("initiateUpload", () => {
+	it("keeps the reservation floor longer than the presign TTL and below the cap", () => {
+		// The upload record must last longer than the upload link, or a late upload has no record.
+		expect(UPLOAD_WINDOW_MS).toBeGreaterThan(UPLOAD_URL_TTL_SECONDS * 1000);
+		expect(UPLOAD_WINDOW_MAX_MS).toBeGreaterThan(UPLOAD_WINDOW_MS);
+	});
+
 	it("reserves the declared bytes and returns a presigned PUT", async () => {
 		const user = await createTestUser();
 		const dir = await createTestDirectory(user._id);
@@ -1071,7 +1124,7 @@ describe("initiateUpload", () => {
 
 		// The size whose transfer estimate lands exactly on the 1-hour clamp, so
 		// anything above it is clamped rather than sized by the transfer.
-		const ceilingSize = (ONE_HOUR_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
+		const ceilingSize = (UPLOAD_WINDOW_MAX_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
 
 		const before = Date.now();
 		const small = await initiateUpload(dir._id, user._id, "small.txt", 100, 10 ** 9);
@@ -1093,14 +1146,14 @@ describe("initiateUpload", () => {
 
 		// Invariant 1: a PUT may START as late as mint + presign TTL, so every
 		// window covers the TTL *plus* the expected transfer time.
-		expect(smallWindow).toBeGreaterThanOrEqual(ttlMs + FIFTEEN_MINUTES_MS);
-		expect(midWindow).toBeGreaterThan(ttlMs + FIFTEEN_MINUTES_MS);
-		expect(midWindow).toBeLessThan(ttlMs + ONE_HOUR_MS);
+		expect(smallWindow).toBeGreaterThanOrEqual(ttlMs + UPLOAD_WINDOW_MS);
+		expect(midWindow).toBeGreaterThan(ttlMs + UPLOAD_WINDOW_MS);
+		expect(midWindow).toBeLessThan(ttlMs + UPLOAD_WINDOW_MAX_MS);
 
 		// The ceiling is reachable and really does bound the window, rather than
 		// being dead code no declared size ever reaches.
-		expect(largeWindow).toBeGreaterThanOrEqual(ttlMs + ONE_HOUR_MS);
-		expect(largeWindow).toBeLessThan(ttlMs + ONE_HOUR_MS + 10_000);
+		expect(largeWindow).toBeGreaterThanOrEqual(ttlMs + UPLOAD_WINDOW_MAX_MS);
+		expect(largeWindow).toBeLessThan(ttlMs + UPLOAD_WINDOW_MAX_MS + 10_000);
 	});
 
 	it("never lets a reservation deadline outrun MAX_UPLOAD_RESERVATION_MS", async () => {
@@ -1109,7 +1162,7 @@ describe("initiateUpload", () => {
 
 		// Past this declared size the transfer estimate pins the 1-hour clamp, so
 		// the per-file cap above it is the worst case the formula can produce.
-		const ceilingSize = (ONE_HOUR_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
+		const ceilingSize = (UPLOAD_WINDOW_MAX_MS / 1000) * MIN_UPLOAD_BYTES_PER_SECOND;
 		expect(MAX_FILE_UPLOAD_SIZE).toBeGreaterThan(ceilingSize);
 
 		const before = Date.now();
@@ -1148,7 +1201,7 @@ describe("initiateUpload", () => {
 		// Not strict: mint and `after` can land in the same millisecond, and the
 		// suite's determinism is a held property.
 		expect(deadline).toBeLessThanOrEqual(
-			after + MAX_UPLOAD_RESERVATION_MS - (ONE_HOUR_MS - FIFTEEN_MINUTES_MS),
+			after + MAX_UPLOAD_RESERVATION_MS - (UPLOAD_WINDOW_MAX_MS - UPLOAD_WINDOW_MS),
 		);
 	});
 
@@ -3313,5 +3366,61 @@ describe("getFile and createDownloadUrl", () => {
 		await expect(
 			createDownloadUrl(new mongoose.Types.ObjectId(), owner._id),
 		).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+	});
+});
+
+describe("upload failure warns stay free of keys and driver messages", () => {
+	const driverFailure = () =>
+		Object.assign(new Error("SECRET-MESSAGE files/leaky-key"), {
+			name: "MongoServerError",
+		});
+
+	const expectSanitizedWarn = (warn, prefix) => {
+		expect(warn).toHaveBeenCalledTimes(1);
+		const logged = warn.mock.calls.flat().join("\n");
+		expect(logged).toMatch(new RegExp(`${prefix} [0-9a-f]{24}: MongoServerError`));
+		expect(logged).not.toContain("SECRET-MESSAGE");
+		expect(logged).not.toContain("files/");
+	};
+
+	it("claim: warns with the file id and error name, rejects FILE_UPLOAD_FAILED", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.spyOn(File, "create").mockRejectedValueOnce(driverFailure());
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"claim.txt",
+				Readable.from(Buffer.from("x")),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+
+		expectSanitizedWarn(warn, "Failed to claim the upload for file");
+	});
+
+	it("finalize: warns with the file id and error name, rejects FILE_UPLOAD_FAILED", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		// Fail straight away rather than later: the real code chains more calls onto this one.
+		vi.spyOn(File, "findOneAndUpdate").mockImplementationOnce(() => {
+			throw driverFailure();
+		});
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"finalize.txt",
+				Readable.from(Buffer.from("x")),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+
+		expectSanitizedWarn(warn, "Failed to finalize the upload for file");
 	});
 });

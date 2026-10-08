@@ -33,7 +33,7 @@ const ownedFileKeys = async (keys) => {
 };
 
 const ownedProfilePictureKeys = async (keys) => {
-	const rows = await User.find({ profilePictureKey: { $in: keys } })
+	const rows = await User.find({ profilePictureKey: { $in: keys, $type: "string" } })
 		.select("profilePictureKey")
 		.lean();
 
