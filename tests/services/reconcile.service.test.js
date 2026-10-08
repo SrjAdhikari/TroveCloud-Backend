@@ -106,6 +106,18 @@ describe("scanForOrphans", () => {
 		]);
 	});
 
+	it("queries profile-picture owners through the partial index filter", async () => {
+		const findSpy = vi.spyOn(User, "find");
+		const key = pictureKey();
+		stockBucket([aged(key)]);
+
+		await scanForOrphans();
+
+		expect(findSpy).toHaveBeenCalledWith({
+			profilePictureKey: { $in: [key], $type: "string" },
+		});
+	});
+
 	// `File.objectKey` is `select: false`; a broken projection makes every file
 	// in the bucket look orphaned.
 	it("treats an object claimed by a ready row as owned", async () => {
