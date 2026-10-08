@@ -65,6 +65,7 @@ Flags combine: `--apply --verbose --max-ratio=0.5` is one run.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | A dry run under the threshold, or an `--apply` run that deleted everything it found (including a run with nothing to reclaim).             |
 | `1`  | A dry run whose ratio is over the threshold; a tripped breaker under `--apply`; per-key delete failures; a failed scan; a usage error.     |
+| `130` / `143` | The process was stopped mid-run: `130` by Ctrl+C, `143` by a shutdown request. Treat the run as incomplete and re-run it. |
 
 A non-zero exit is how a scheduler learns the job needs a human. Per-key delete failures do not stop the remaining keys, and the job is idempotent — the next run re-finds whatever was missed.
 

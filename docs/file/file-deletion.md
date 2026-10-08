@@ -77,7 +77,7 @@ The DB delete is transactional: `File.deleteOne` and the `updateAncestorDirector
 
 ### `removeObject` swallows its own failures
 
-`removeObject` wraps `deleteObject` in a `try/catch` that warn-logs the error's `name` and HTTP status and **does not rethrow**. A `DELETE` whose R2 call fails therefore still returns `200` with the deleted document, because by then the row is already gone and the caller has nothing left to retry — re-running the request would only return `404`. The cost of that choice is an object nobody names any more; it is billed until a reconciliation pass removes it, and a trigger for that pass is tracked separately. This is the same resilience posture as the `Promise.allSettled` fan-out in directory deletion, which also warn-logs rejected deletes rather than failing the request.
+`removeObject` wraps `deleteObject` in a `try/catch` that warn-logs the error's `name` and HTTP status and **does not rethrow**. A `DELETE` whose R2 call fails therefore still returns `200` with the deleted document, because by then the row is already gone and the caller has nothing left to retry — re-running the request would only return `404`. The cost of that choice is an object nobody names any more; it is billed until a reconciliation pass removes it, and a trigger for that pass is tracked separately. Directory deletion takes the same posture through `removeObjects`, which deletes in batches and also warn-logs failures rather than failing the request.
 
 A delete for a key with no object behind it is not a failure to begin with: `DeleteObject` is idempotent in R2, so a file whose object was already dropped deletes cleanly.
 

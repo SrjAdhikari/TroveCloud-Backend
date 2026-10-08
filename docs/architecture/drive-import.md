@@ -173,7 +173,7 @@ Conservative defaults. The two byte caps are read from the environment through `
 | Per-file size cap           | env (100 MB) | `streamFileIntoTrove` pre-flight (via `size` from metadata) AND post-hoc byte counter (for native exports where `size` is absent) |
 | Aggregate bytes per request | env (200 MB) | Transfer budget: `ctx.totalBytes` counts bytes streamed from Drive, including files later rejected; short-circuits remaining items with `DRIVE_IMPORT_LIMIT_EXCEEDED` |
 | Per-user storage quota      | `User.storageLimit` | `streamFileIntoTrove` pre-flight against the declared `size` (regular files only, before the download) AND `checkQuota` inside `uploadFileFromServer`, per file; an over-quota item fails with `STORAGE_LIMIT_EXCEEDED` and the batch continues |
-| Folder recursion depth      | 20           | Parameter passed through `importItem`; matches `$graphLookup` `maxDepth` elsewhere in the codebase                       |
+| Folder recursion depth      | 20           | `MAX_DEPTH` in `drive.service.js`, checked on each recursive `importItem` call                       |
 | `accessToken` string length | ≤ 4096       | `importDriveSchema` (`validateBody`, defensive)                                                                          |
 | Drive fetch timeout         | 15s per call | `AbortSignal.timeout` in `googleDrive.js`                                                                                |
 | Picker items deduplicated   | by `driveId` | Orchestrator `seen` set (survives folder traversal)                                                                      |

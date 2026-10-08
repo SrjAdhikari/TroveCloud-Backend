@@ -36,9 +36,14 @@ Please navigate to the specific domain you need below:
 
 ### 📂 [API Documentation](./api)
 
-- `endpoints.md` - Master list of all available API routes
 - [`error-codes.md`](./api/error-codes.md) - Glossary for `appErrorCode` constants, HTTP-status conventions, framework-error mappings.
-- `postman-collection.json` - Exported configurations for local testing
+
+### 📂 [Directory](./directory)
+
+- [`directory-creation.md`](./directory/directory-creation.md) - Create a directory
+- [`directory-retrieval.md`](./directory/directory-retrieval.md) - Retrieve a directory and its contents
+- [`directory-update.md`](./directory/directory-update.md) - Rename a directory
+- [`directory-deletion.md`](./directory/directory-deletion.md) - Delete a directory tree and its stored objects
 
 ### 📂 [File](./file)
 
@@ -46,13 +51,3 @@ Please navigate to the specific domain you need below:
 - [`file-upload.md`](./file/file-upload.md) - Browser-direct upload to object storage, with quota reservation, cancellation, and reclaim
 - [`file-update.md`](./file/file-update.md) - Rename a file (atomic single-query update)
 - [`file-deletion.md`](./file/file-deletion.md) - Delete a file's DB record and its stored object
-
-### 📂 [Features](./features)
-
-- `directory-management.md` - Logic for managing nested recursive directories
-- `file-upload.md` - Logic for handling S3/Multer uploads
-
-### 📂 [Deployment](./deployment)
-
-- `local-setup.md` - Guide for spinning up the development server locally
-- `production.md` - Production CI/CD strategies

@@ -64,7 +64,7 @@ Unlike the directory rename (which requires a separate query for the root direct
 
 ### No Physical File Rename Required
 
-Since files are stored on disk using `<ObjectId><extension>` as the filename, renaming a file only updates the `name` field in MongoDB. The physical file on disk is unaffected — no filesystem rename, no race conditions, no broken references.
+Since files are stored in R2 under a generated object key, renaming a file only updates the `name` field in MongoDB. The stored object is unaffected — no object copy or rename, no race conditions, no broken references.
 
 ---
 

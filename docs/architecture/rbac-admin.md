@@ -47,7 +47,7 @@ The intent is to lay the **foundation** for future admin tooling cleanly — ext
 | Single-role topology | This deployment runs exactly **one** superadmin and **one** admin (operational invariant, not code-enforced). | Lets the service layer skip multi-superadmin defenses (last-superadmin count guard, TOCTOU race transactions) that would otherwise add complexity for scenarios that can't arise. If multiple superadmins are ever introduced, re-add the count guard at the time. |
 | v1 privilege split | **Reads + force-logout: `admin` & `superadmin`. All mutations (role / suspend / unsuspend / soft-delete / hard-delete / restore): `superadmin` only.** | Conservative v1 posture: admins get visibility and the ability to punt active sessions; only superadmins can permanently alter account state. Service-layer `assertCanActOn` remains the second line of defense if the route gates are ever loosened. |
 | Hierarchy enforcement (service layer) | Caller must outrank target. Same-rank or higher target → `CANNOT_ACT_ON_PEER`. Enforced in services even when the route gate already restricts the caller, so a future relaxation of route gates can't quietly grant peer-on-peer actions. | Defense in depth. |
-| Hard-delete cascade | Wipe `User`, `File`, `Directory`, `Session` (DB) + physical disk files. | Irreversible by design — this is the only place admin-driven disk space is freed. |
+| Hard-delete cascade | Wipe `User`, `File`, `Directory`, `Session` (DB) + stored objects in R2. | Irreversible by design — this is the only place admin-driven storage is freed. |
 | Code organization | `src/routes/admin/`, `src/controllers/admin/`, `src/services/admin/` | Mirrors existing layer discipline; isolates admin surface for future review/permission tightening. |
 
 ---
@@ -118,7 +118,7 @@ Single source of truth — the timestamps. Status is computed on the fly for API
 | Admin overview controller | `src/controllers/admin/overview.controller.js` | New | Overview handler |
 | Admin user service | `src/services/admin/user.service.js` | New | Business logic for user admin actions + cascades |
 | Admin overview service | `src/services/admin/overview.service.js` | New | System-wide aggregations (counts, totals, recent-signup window) |
-| Storage cleanup helper | (reuse existing if present, else `src/utils/storage.cleanup.js`) | Reuse / New | Wipes a user's physical files from disk during purge. Reuse whatever `src/services/file/file.service.js` uses for delete today; do not reinvent. |
+| Storage cleanup helper | `src/services/file/objectCleanup.service.js` | Reuse | Wipes a user's stored objects from R2 during purge. Reuse `removeObjects`; do not reinvent. |
 | App error codes | `src/constants/appErrorCode.js` | Modified | Add `ACCOUNT_SUSPENDED`, `CANNOT_ACT_ON_SELF`, `CANNOT_ACT_ON_PEER`, `LAST_SUPERADMIN`, `INSUFFICIENT_ROLE`. `ACCESS_DENIED` already exists. |
 | Seed script | `scripts/seed-superadmin.js` | New | CLI: backfill missing `role`/`suspendedAt`/`deletedAt` fields, then promote target user to superadmin |
 | `package.json` | `package.json` | Modified | Add `"seed:superadmin": "node scripts/seed-superadmin.js"` |
@@ -213,7 +213,7 @@ Soft delete. Sets `deletedAt`. Cascades to revoking sessions only (files/directo
 - **Side effects (wrapped in `session.withTransaction()` per STACK.md):** set `deletedAt=now`; revoke all sessions.
 
 ### `DELETE /api/admin/users/:id/hard-delete` — **superadmin only**
-Hard delete. Irreversible. Removes user + all their data from DB and disk.
+Hard delete. Irreversible. Removes user + all their data from the DB and R2.
 - **Pre-checks:** same as soft delete.
 - **Side effects (in this exact order):**
   1. **MongoDB transaction** (`session.withTransaction()` per STACK.md):
@@ -221,7 +221,7 @@ Hard delete. Irreversible. Removes user + all their data from DB and disk.
      - `File.deleteMany({ userId })`
      - `Directory.deleteMany({ userId })`
      - `User.deleteOne({ _id: userId })`
-  2. **After commit:** delete the user's physical files from disk via the existing file-deletion utility used by `src/services/file/file.service.js`. If disk delete fails: log a warning, leave orphans for manual cleanup (DB is source of truth).
+  2. **After commit:** delete the user's stored objects from R2 via `removeObjects`. If an object delete fails: log a warning, leave orphans for manual cleanup (DB is source of truth).
 - **Response:** `{ filesDeleted, directoriesDeleted, bytesFreed }` (tallied during the transaction so the response itself gives the admin a confirmation of what was wiped).
 
 ### `POST /api/admin/users/:id/restore` — **superadmin only**
@@ -379,8 +379,8 @@ Smoke tests that exercise the shipped surface:
 - Promote a second user via `PATCH /admin/users/:id/role` → next request from that user reaches admin routes (role is read from `req.user.role` per request; no session invalidation needed).
 - Suspend a user → `suspendedAt` set, sessions revoked, subsequent login attempts return `403 ACCOUNT_SUSPENDED`.
 - Force-logout a user → response `{ sessionsRevoked: N }` matches `Session.deleteMany` count.
-- Soft-delete → `deletedAt` set, login blocked with `UNAUTHORIZED_ACCESS`; files remain on disk.
-- Hard-delete a user with at least 1 file + 1 directory → User/File/Directory/Session docs gone, disk files removed (or warn-logged on failure), response tallies match.
+- Soft-delete → `deletedAt` set, login blocked with `UNAUTHORIZED_ACCESS`; files remain in storage.
+- Hard-delete a user with at least 1 file + 1 directory → User/File/Directory/Session docs gone, stored objects removed (or warn-logged on failure), response tallies match.
 - Soft-delete then restore → `deletedAt` cleared. If the user was suspended before deletion, `suspendedAt` is preserved and they stay locked out until unsuspended.
 - Restore a user who is not soft-deleted → `400 INVALID_INPUT`.
 - Suspend self → `403 CANNOT_ACT_ON_SELF`.
