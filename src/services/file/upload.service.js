@@ -195,8 +195,12 @@ const initiateUpload = async (
 			contentType,
 			contentLength: declaredSize,
 		});
-	} catch {
+	} catch (error) {
 		await releaseReservedBytes(fileId, parentDir._id, declaredSize);
+
+		console.warn(
+			`Failed to presign the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+		);
 
 		throw new AppError(
 			"Failed to start the upload",

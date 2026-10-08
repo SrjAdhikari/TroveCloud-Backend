@@ -75,6 +75,11 @@ const createUploadClaim = async (
 		});
 	} catch (error) {
 		if (error instanceof AppError) throw error;
+
+		console.warn(
+			`Failed to claim the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+		);
+
 		throw new AppError(
 			"Failed to upload file",
 			INTERNAL_SERVER_ERROR,
@@ -120,7 +125,7 @@ const uploadFileFromServer = async (
 
 	try {
 		await putObject(objectKey, countedStream, { contentType });
-	} catch {
+	} catch (error) {
 		await rollbackFailedUpload(fileId, parentDir._id, objectKey);
 
 		if (byteCounter.state.tripped) {
@@ -130,6 +135,10 @@ const uploadFileFromServer = async (
 				FILE_TOO_LARGE,
 			);
 		}
+
+		console.warn(
+			`Failed to store the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+		);
 
 		throw new AppError(
 			"Failed to upload file",
@@ -186,6 +195,11 @@ const uploadFileFromServer = async (
 		await rollbackFailedUpload(fileId, parentDir._id, objectKey);
 
 		if (error instanceof AppError) throw error;
+
+		console.warn(
+			`Failed to finalize the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+		);
+
 		throw new AppError(
 			"Failed to upload file",
 			INTERNAL_SERVER_ERROR,

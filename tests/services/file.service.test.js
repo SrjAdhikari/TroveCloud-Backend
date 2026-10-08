@@ -815,6 +815,54 @@ describe("uploadFileFromServer claims the row before writing bytes", () => {
 		expect(await objectExists(claimed.objectKey)).toBe(false);
 		expect(await dirStats(root._id)).toEqual({ size: 0, fileCount: 0 });
 	});
+
+	it("logs the failure cause, without the object key, when the stream fails mid-upload", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		let claimed = null;
+		const snapshot = claimOf(user);
+		const source = new Readable({
+			read() {
+				snapshot()
+					.then((doc) => {
+						claimed = doc;
+						this.destroy(Object.assign(new Error("boom"), { name: "BoomError" }));
+					})
+					.catch((err) => this.destroy(err));
+			},
+		});
+
+		await expect(
+			uploadFileFromServer(root._id, user._id, "torn.txt", source, 10 ** 9),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+		createdKeys.add(claimed.objectKey);
+
+		const logged = warn.mock.calls.flat().join("\n");
+		expect(logged).toContain(String(claimed._id));
+		expect(logged).toContain("BoomError");
+		expect(logged).not.toContain(claimed.objectKey);
+	});
+
+	it("does not warn when the byte cap trips", async () => {
+		const user = await createTestUser();
+		const root = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		await expect(
+			uploadFileFromServer(
+				root._id,
+				user._id,
+				"huge.bin",
+				Readable.from([Buffer.alloc(1024)]),
+				10 ** 9,
+				{ perFileCap: 512 },
+			),
+		).rejects.toMatchObject({ code: "FILE_TOO_LARGE" });
+
+		expect(warn).not.toHaveBeenCalled();
+	});
 });
 
 describe("deleteFile maintains folder sizes", () => {
@@ -3319,5 +3367,61 @@ describe("getFile and createDownloadUrl", () => {
 		await expect(
 			createDownloadUrl(new mongoose.Types.ObjectId(), owner._id),
 		).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+	});
+});
+
+describe("upload failure warns stay free of keys and driver messages", () => {
+	const driverFailure = () =>
+		Object.assign(new Error("SECRET-MESSAGE files/leaky-key"), {
+			name: "MongoServerError",
+		});
+
+	const expectSanitizedWarn = (warn, prefix) => {
+		expect(warn).toHaveBeenCalledTimes(1);
+		const logged = warn.mock.calls.flat().join("\n");
+		expect(logged).toMatch(new RegExp(`${prefix} [0-9a-f]{24}: MongoServerError`));
+		expect(logged).not.toContain("SECRET-MESSAGE");
+		expect(logged).not.toContain("files/");
+	};
+
+	it("claim: warns with the file id and error name, rejects FILE_UPLOAD_FAILED", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.spyOn(File, "create").mockRejectedValueOnce(driverFailure());
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"claim.txt",
+				Readable.from(Buffer.from("x")),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+
+		expectSanitizedWarn(warn, "Failed to claim the upload for file");
+	});
+
+	it("finalize: warns with the file id and error name, rejects FILE_UPLOAD_FAILED", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		// Fail straight away rather than later: the real code chains more calls onto this one.
+		vi.spyOn(File, "findOneAndUpdate").mockImplementationOnce(() => {
+			throw driverFailure();
+		});
+
+		await expect(
+			uploadFileFromServer(
+				dir._id,
+				user._id,
+				"finalize.txt",
+				Readable.from(Buffer.from("x")),
+				10 ** 9,
+			),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+
+		expectSanitizedWarn(warn, "Failed to finalize the upload for file");
 	});
 });
