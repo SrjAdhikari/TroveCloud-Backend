@@ -203,8 +203,8 @@ The refs in one place:
 
 **Cascading deletes** are handled in two places:
 
-- `directory.service.js`'s recursive delete walks the tree via `$graphLookup`, deletes directory + file rows inside a transaction, and drops their R2 objects with `Promise.allSettled` outside.
-- `admin/user.service.js`'s `hardDeleteUser` wipes `Session`, `File`, `Directory`, and `User` rows in one transaction, with the same outside-the-transaction `Promise.allSettled` shape for physical-file cleanup. See `transaction-patterns.md` for the "not-retry-safe work stays out" rule.
+- `directory.service.js`'s recursive delete walks the tree via `$graphLookup`, deletes directory + file rows inside a transaction, and drops their R2 objects outside with `removeObjects` (batched, never throws).
+- `admin/user.service.js`'s `hardDeleteUser` wipes `Session`, `File`, `Directory`, and `User` rows in one transaction, with the same outside-the-transaction `removeObjects` call for object cleanup. See `transaction-patterns.md` for the "not-retry-safe work stays out" rule.
 
 ---
 
