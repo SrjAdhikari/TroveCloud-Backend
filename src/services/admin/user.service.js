@@ -12,7 +12,7 @@ import httpStatus from "../../constants/httpStatus.js";
 import appErrorCode from "../../constants/appErrorCode.js";
 import { ROLES, ROLE_RANK } from "../../constants/roles.js";
 import { USER_STATUS, getUserStatus } from "../../utils/userStatus.js";
-import { deleteObject } from "../../lib/r2.js";
+import { removeObjects } from "../file/objectCleanup.service.js";
 
 const { BAD_REQUEST, NOT_FOUND, FORBIDDEN } = httpStatus;
 const {
@@ -501,17 +501,7 @@ const hardDeleteUser = async (caller, targetId) => {
 	}
 
 	// Delete the stored objects from R2
-	await Promise.allSettled(
-		objectsToWipe.map(async ({ key, label }) => {
-			try {
-				await deleteObject(key);
-			} catch (error) {
-				console.warn(
-					`Hard-delete: failed to remove the object for ${label}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
-				);
-			}
-		}),
-	);
+	await removeObjects(objectsToWipe);
 
 	return deletionSummary;
 };

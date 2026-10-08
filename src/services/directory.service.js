@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import Directory from "../models/directory.model.js";
 import File from "../models/file.model.js";
 import AppError from "../errors/AppError.js";
-import { deleteObject } from "../lib/r2.js";
+import { removeObjects } from "./file/objectCleanup.service.js";
 import httpStatus from "../constants/httpStatus.js";
 import appErrorCode from "../constants/appErrorCode.js";
 import { generateBreadCrumb, generatePath } from "../utils/path.js";
@@ -285,16 +285,11 @@ const deleteDirectory = async (directoryId, userId) => {
 	}
 
 	// Step 6: Delete the physical files from R2
-	await Promise.allSettled(
-		allFiles.map(async (file) => {
-			try {
-				await deleteObject(file.objectKey);
-			} catch (error) {
-				console.warn(
-					`Failed to remove the object for file ${file._id}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
-				);
-			}
-		}),
+	await removeObjects(
+		allFiles.map((file) => ({
+			key: file.objectKey,
+			label: `file ${file._id}`,
+		})),
 	);
 
 	return rootDir;

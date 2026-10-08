@@ -700,9 +700,8 @@ describe("deleteDirectory removes the subtree's stored objects", () => {
 		track(bad.objectKey);
 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-		// Written through the driver to bypass schema validation: `assertKey`
-		// throws synchronously inside the loop and the run must survive it.
+		// Saved directly to the database so the broken key gets past the usual
+		// checks; the folder delete should skip it and still remove the other files.
 		const leakyNonce = "a".repeat(32);
 		await File.collection.updateOne(
 			{ _id: bad._id },
