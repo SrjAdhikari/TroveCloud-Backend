@@ -51,7 +51,7 @@ describe("File.objectKey", () => {
 
 	it("rejects a key outside the files prefix", async () => {
 		await expect(
-			File.create(await baseFile({ objectKey: `profile-pictures/${ID_HEX()}/${"a".repeat(32)}` })),
+			File.create(await baseFile({ objectKey: `profile-pictures/${ID_HEX()}-${"a".repeat(32)}` })),
 		).rejects.toThrow();
 		await expect(
 			File.create(await baseFile({ objectKey: "files/no-nonce.txt" })),

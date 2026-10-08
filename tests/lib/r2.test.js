@@ -7,6 +7,7 @@ import {
 	r2Client,
 	buildFileKey,
 	buildProfilePictureKey,
+	PROFILE_PICTURE_KEY_PATTERN,
 	presignPut,
 	presignGet,
 	getObjectMetadata,
@@ -65,7 +66,7 @@ describe("r2 key builders", () => {
 
 	it("scopes profile picture keys to their owner", () => {
 		const token = "b".repeat(32);
-		expect(buildProfilePictureKey(ID, token)).toBe(`profile-pictures/${ID}/${token}`);
+		expect(buildProfilePictureKey(ID, token)).toBe(`profile-pictures/${ID}-${token}`);
 	});
 
 	it("rejects a malformed owner id or token", () => {
@@ -73,6 +74,42 @@ describe("r2 key builders", () => {
 		expect(() => buildProfilePictureKey(ID, "zz")).toThrow();
 		expect(() => buildProfilePictureKey(ID, "A".repeat(32))).toThrow();
 		expect(() => buildProfilePictureKey("nope", "b".repeat(32))).toThrow();
+	});
+});
+
+describe("PROFILE_PICTURE_KEY_PATTERN", () => {
+	const N = "b".repeat(32);
+
+	it("accepts the flat shape", () => {
+		expect(PROFILE_PICTURE_KEY_PATTERN.test(`profile-pictures/${ID}-${N}`)).toBe(true);
+	});
+
+	it.each([
+		["the old nested shape", `profile-pictures/${ID}/${N}`],
+		["a short owner id", `profile-pictures/${ID.slice(1)}-${N}`],
+		["a long owner id", `profile-pictures/${ID}a-${N}`],
+		["a short nonce", `profile-pictures/${ID}-${N.slice(1)}`],
+		["a long nonce", `profile-pictures/${ID}-${N}a`],
+		["an uppercase owner id", `profile-pictures/${ID.toUpperCase()}-${N}`],
+		["an uppercase nonce", `profile-pictures/${ID}-${N.toUpperCase()}`],
+		["a missing nonce", `profile-pictures/${ID}-`],
+		["a missing owner id", `profile-pictures/-${N}`],
+		["a missing separator", `profile-pictures/${ID}${N}`],
+		["an extra path segment", `profile-pictures/x/${ID}-${N}`],
+		["a trailing slash", `profile-pictures/${ID}-${N}/`],
+		["a trailing newline", `profile-pictures/${ID}-${N}\n`],
+		["a file extension", `profile-pictures/${ID}-${N}.png`],
+		["a wrong prefix", `files/${ID}-${N}`],
+		["an empty string", ""],
+	])("rejects %s", (_label, key) => {
+		expect(PROFILE_PICTURE_KEY_PATTERN.test(key)).toBe(false);
+	});
+
+	it("refuses a null or undefined token or key", async () => {
+		expect(() => buildProfilePictureKey(ID, null)).toThrow();
+		expect(() => buildProfilePictureKey(ID, undefined)).toThrow();
+		await expect(presignGet(null)).rejects.toMatchObject({ statusCode: 400 });
+		await expect(presignGet(undefined)).rejects.toMatchObject({ statusCode: 400 });
 	});
 });
 
@@ -86,7 +123,10 @@ describe("r2 key validation", () => {
 			statusCode: 400,
 		});
 		await expect(
-			presignPut("profile-pictures/tooshort/abc", { contentType: "text/plain", contentLength: 1 }),
+			presignPut("profile-pictures/tooshort-abc", { contentType: "text/plain", contentLength: 1 }),
+		).rejects.toMatchObject({ statusCode: 400 });
+		await expect(
+			presignPut(`profile-pictures/${ID}/${NONCE}`, { contentType: "text/plain", contentLength: 1 }),
 		).rejects.toMatchObject({ statusCode: 400 });
 	});
 });

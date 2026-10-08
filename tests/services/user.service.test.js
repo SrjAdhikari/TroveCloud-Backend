@@ -96,7 +96,7 @@ describe("user.service.uploadProfilePicture", () => {
 		);
 
 		expect(result.profilePictureKey).toMatch(
-			new RegExp(`^profile-pictures/${user._id}/[a-f0-9]{32}$`),
+			new RegExp(`^profile-pictures/${user._id}-[a-f0-9]{32}$`),
 		);
 
 		const object = await getObjectMetadata(result.profilePictureKey);
@@ -352,7 +352,7 @@ describe("user.service.uploadProfilePicture", () => {
 		}
 
 		expect(orphanKey).toMatch(
-			new RegExp(`^profile-pictures/${user._id}/[a-f0-9]{32}$`),
+			new RegExp(`^profile-pictures/${user._id}-[a-f0-9]{32}$`),
 		);
 		expect(await getObjectMetadata(orphanKey)).toBeNull();
 	});

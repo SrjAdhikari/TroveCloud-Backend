@@ -44,7 +44,7 @@ const nonce = () => randomBytes(16).toString("hex");
 
 const fileKey = (id = objectId()) => `files/${id}-${nonce()}.pdf`;
 const pictureKey = (ownerId = objectId()) =>
-	`profile-pictures/${ownerId}/${nonce()}`;
+	`profile-pictures/${ownerId}-${nonce()}`;
 
 // Ages are expressed against the frozen clock so the floor comparison is exact.
 const aged = (key, { olderBy = ONE_MINUTE_MS, size = 100 } = {}) => ({
