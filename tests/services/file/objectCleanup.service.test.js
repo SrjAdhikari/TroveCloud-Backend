@@ -97,6 +97,16 @@ describe("removeObjects", () => {
 		expect(logged).not.toContain(nonce);
 	});
 
+	it("never throws, even when the failure is not an Error", async () => {
+		deleteObjects.mockRejectedValue(null);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		await expect(
+			removeObjects([{ key: keyA, label: "file a" }]),
+		).resolves.toBeUndefined();
+		expect(warn).toHaveBeenCalledTimes(1);
+	});
+
 	describe("batching", () => {
 		const manyItems = (count) =>
 			Array.from({ length: count }, (_, i) => {

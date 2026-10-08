@@ -40,4 +40,15 @@ describe("initiateUpload presign failure", () => {
 		expect(logged).not.toContain("files/");
 		expect(await File.countDocuments({ userId: user._id })).toBe(0);
 	});
+
+	it("still rejects FILE_UPLOAD_FAILED when the failure is not an Error", async () => {
+		const user = await createTestUser();
+		const dir = await createTestDirectory(user._id);
+		presignPut.mockRejectedValueOnce(null);
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		await expect(
+			initiateUpload(dir._id, user._id, "presign.txt", 100, 1_000_000),
+		).rejects.toMatchObject({ code: "FILE_UPLOAD_FAILED" });
+	});
 });

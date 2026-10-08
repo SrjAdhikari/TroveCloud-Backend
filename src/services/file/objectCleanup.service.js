@@ -46,7 +46,7 @@ const removeObjects = async (items) => {
 			}
 		} catch (error) {
 			console.warn(
-				`Failed to remove ${chunk.length} objects: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+				`Failed to remove ${chunk.length} objects: ${error?.name} ${error?.$metadata?.httpStatusCode ?? ""}`.trim(),
 			);
 		}
 	}

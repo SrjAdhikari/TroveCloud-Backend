@@ -199,7 +199,7 @@ const initiateUpload = async (
 		await releaseReservedBytes(fileId, parentDir._id, declaredSize);
 
 		console.warn(
-			`Failed to presign the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+			`Failed to presign the upload for file ${fileId}: ${error?.name} ${error?.$metadata?.httpStatusCode ?? ""}`.trim(),
 		);
 
 		throw new AppError(

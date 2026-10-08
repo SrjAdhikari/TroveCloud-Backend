@@ -77,7 +77,7 @@ const createUploadClaim = async (
 		if (error instanceof AppError) throw error;
 
 		console.warn(
-			`Failed to claim the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+			`Failed to claim the upload for file ${fileId}: ${error?.name} ${error?.$metadata?.httpStatusCode ?? ""}`.trim(),
 		);
 
 		throw new AppError(
@@ -137,7 +137,7 @@ const uploadFileFromServer = async (
 		}
 
 		console.warn(
-			`Failed to store the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+			`Failed to store the upload for file ${fileId}: ${error?.name} ${error?.$metadata?.httpStatusCode ?? ""}`.trim(),
 		);
 
 		throw new AppError(
@@ -197,7 +197,7 @@ const uploadFileFromServer = async (
 		if (error instanceof AppError) throw error;
 
 		console.warn(
-			`Failed to finalize the upload for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
+			`Failed to finalize the upload for file ${fileId}: ${error?.name} ${error?.$metadata?.httpStatusCode ?? ""}`.trim(),
 		);
 
 		throw new AppError(
