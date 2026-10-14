@@ -6,7 +6,7 @@ import httpStatus from "../constants/httpStatus.js";
 
 const { OK } = httpStatus;
 
-const importDriveHandler = async (req, res) => {
+export const importDriveHandler = async (req, res) => {
 	// Body shape (accessToken, items, parentDirId) is validated by
 	// importDriveSchema (validateBody) before this handler runs.
 	const { accessToken, items, parentDirId } = req.body;
@@ -28,5 +28,3 @@ const importDriveHandler = async (req, res) => {
 		data: result,
 	});
 };
-
-export { importDriveHandler };

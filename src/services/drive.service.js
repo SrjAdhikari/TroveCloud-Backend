@@ -48,7 +48,7 @@ const MAX_DEPTH = 20;
  * and path separators. `Directory.name` is bounded to [3, 50] in Mongoose —
  * this guarantees that.
  */
-const sanitizeDirName = (name) => {
+export const sanitizeDirName = (name) => {
 	// sanitizeInput strips HTML and coerces non-strings to "".
 	let clean = sanitizeInput(name).replace(/[\r\n\t\\/]/g, "").trim();
 
@@ -65,7 +65,7 @@ const sanitizeDirName = (name) => {
  * When `fallbackExt` is supplied (Google-native export), ensures the name carries
  * that extension — `uploadFileFromServer` rejects a name without one.
  */
-const sanitizeFileName = (name, fallbackExt = "") => {
+export const sanitizeFileName = (name, fallbackExt = "") => {
 	// sanitizeInput strips HTML and coerces non-strings to "".
 	let clean = path
 		.basename(sanitizeInput(name))
@@ -385,7 +385,7 @@ const importItem = async (
  * @param {number} storageLimit - The user's quota in bytes, enforced per imported file.
  * @returns {Promise<{imported:Array, failed:Array}>}
  */
-const importFromDrive = async (
+export const importFromDrive = async (
 	userId,
 	accessToken,
 	items,
@@ -423,5 +423,3 @@ const importFromDrive = async (
 
 	return { imported: ctx.imported, failed: ctx.failed };
 };
-
-export { importFromDrive, sanitizeDirName, sanitizeFileName };

@@ -13,21 +13,21 @@ const MIN_NAME_LENGTH = 3;
 
 // Strip any HTML, then reduce to a base name (defuses traversal),
 // strip control characters and backslashes, trim and bound length.
-const sanitizeFileName = (value) =>
+export const sanitizeFileName = (value) =>
 	path
 		.basename(sanitizeInput(value))
 		.replace(/[\r\n\t\\]/g, "")
 		.trim()
 		.slice(0, MAX_NAME_LENGTH);
 
-const renameFileSchema = z.object({
+export const renameFileSchema = z.object({
 	newFileName: z
 		.string("Valid file name is required")
 		.transform(sanitizeFileName)
 		.refine((value) => value.length > 0, "Valid file name is required"),
 });
 
-const initiateUploadSchema = z.object({
+export const initiateUploadSchema = z.object({
 	name: z
 		.string("Valid file name is required")
 		.transform(sanitizeFileName)
@@ -41,5 +41,3 @@ const initiateUploadSchema = z.object({
 		.positive("File size must be greater than zero")
 		.max(MAX_FILE_UPLOAD_SIZE, "File exceeds upload size cap"),
 });
-
-export { initiateUploadSchema, renameFileSchema, sanitizeFileName };

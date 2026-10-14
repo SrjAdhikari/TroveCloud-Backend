@@ -8,7 +8,7 @@ import { brand } from "./_base.js";
  * @param {string} text
  * @returns {string} HTML fragment
  */
-const paragraph = (text) =>
+export const paragraph = (text) =>
 	`<p style="margin: 0 0 16px; font-size: 15px; line-height: 1.6; color: ${brand.textColor};">${text}</p>`;
 
 /**
@@ -17,7 +17,7 @@ const paragraph = (text) =>
  * @param {string} text
  * @returns {string} HTML fragment
  */
-const mutedParagraph = (text) =>
+export const mutedParagraph = (text) =>
 	`<p style="margin: 16px 0 0; font-size: 13px; line-height: 1.6; color: ${brand.mutedColor};">${text}</p>`;
 
 /**
@@ -27,7 +27,7 @@ const mutedParagraph = (text) =>
  * @param {string} code
  * @returns {string} HTML fragment
  */
-const codeBox = (code) => `
+export const codeBox = (code) => `
 <div style="text-align: center; margin: 28px 0;">
 	<div style="display: inline-block; padding: 16px 24px; background-color: ${brand.bgColor}; border: 1px solid ${brand.borderColor}; border-radius: 6px;">
 		<span style="font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 28px; font-weight: 600; letter-spacing: 8px; color: ${brand.primaryColor};">${code}</span>
@@ -41,7 +41,7 @@ const codeBox = (code) => `
  * @param {string} message
  * @returns {string} HTML fragment
  */
-const infoCallout = (message) => `
+export const infoCallout = (message) => `
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 24px 0; background-color: ${brand.alertBg}; border-left: 3px solid ${brand.alertBorder}; border-radius: 4px;">
 	<tr>
 		<td style="padding: 12px 16px; font-size: 14px; line-height: 1.6; color: ${brand.alertText};">${message}</td>
@@ -54,7 +54,7 @@ const infoCallout = (message) => `
  * @param {Array<{ label: string, value: string }>} items
  * @returns {string} HTML fragment
  */
-const definitionList = (items) => {
+export const definitionList = (items) => {
 	const rows = items
 		.map(
 			({ label, value }) => `
@@ -70,5 +70,3 @@ const definitionList = (items) => {
 	${rows}
 </table>`;
 };
-
-export { paragraph, mutedParagraph, codeBox, infoCallout, definitionList };

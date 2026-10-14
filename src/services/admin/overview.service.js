@@ -14,7 +14,7 @@ import { SEVEN_DAYS_MS, THIRTY_DAYS_MS } from "../../utils/date.js";
  * User counts are computed from `suspendedAt` / `deletedAt` timestamps so the
  * derived-status invariant holds — there is no stored `status` field.
  */
-const getSystemOverview = async () => {
+export const getSystemOverview = async () => {
 	const now = new Date();
 	const sevenDaysAgo = new Date(now.getTime() - SEVEN_DAYS_MS);
 	const thirtyDaysAgo = new Date(now.getTime() - THIRTY_DAYS_MS);
@@ -88,5 +88,3 @@ const getSystemOverview = async () => {
 		},
 	};
 };
-
-export { getSystemOverview };

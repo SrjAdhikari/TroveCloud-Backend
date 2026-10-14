@@ -25,7 +25,7 @@ const DRIVE_USER_AGENT = "TroveCloud";
  * Unmapped google-apps types (Forms, Drawings, Jamboards, Sites, Shortcuts)
  * are rejected as UNSUPPORTED_DRIVE_TYPE by the service layer.
  */
-const GOOGLE_APPS_EXPORT_MAP = Object.freeze({
+export const GOOGLE_APPS_EXPORT_MAP = Object.freeze({
 	"application/vnd.google-apps.document": {
 		mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		ext: ".docx",
@@ -128,7 +128,7 @@ const handleDriveFetchError = (error, operation) => {
  * @returns {Promise<{id:string, name:string, mimeType:string, size?:string, trashed?:boolean, shortcutDetails?:Object, parents?:string[]}>}
  * @throws {AppError} INVALID_DRIVE_TOKEN / DRIVE_ITEM_NOT_FOUND / DRIVE_IMPORT_FAILED
  */
-const getDriveFileMetadata = async (accessToken, fileId) => {
+export const getDriveFileMetadata = async (accessToken, fileId) => {
 	try {
 		const url = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
 
@@ -161,7 +161,7 @@ const getDriveFileMetadata = async (accessToken, fileId) => {
  * @param {string} fileId
  * @returns {Promise<Response>}
  */
-const downloadDriveFile = async (accessToken, fileId) => {
+export const downloadDriveFile = async (accessToken, fileId) => {
 	try {
 		const url = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
 
@@ -194,7 +194,7 @@ const downloadDriveFile = async (accessToken, fileId) => {
  * @returns {Promise<Response>}
  * @throws {AppError} DRIVE_EXPORT_TOO_LARGE for >= 10 MB Docs/Slides.
  */
-const exportGoogleDoc = async (accessToken, fileId, exportMimeType) => {
+export const exportGoogleDoc = async (accessToken, fileId, exportMimeType) => {
 	try {
 		const url = new URL(
 			`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}/export`,
@@ -228,7 +228,7 @@ const exportGoogleDoc = async (accessToken, fileId, exportMimeType) => {
  *
  * @returns {Promise<{files: Array<{id:string,name:string,mimeType:string,size?:string}>, nextPageToken?:string}>}
  */
-const listDriveFolderChildren = async (accessToken, folderId, pageToken) => {
+export const listDriveFolderChildren = async (accessToken, folderId, pageToken) => {
 	try {
 		const url = new URL(DRIVE_FILES_URL);
 
@@ -256,12 +256,4 @@ const listDriveFolderChildren = async (accessToken, folderId, pageToken) => {
 	} catch (error) {
 		handleDriveFetchError(error, "listDriveFolderChildren");
 	}
-};
-
-export {
-	getDriveFileMetadata,
-	downloadDriveFile,
-	exportGoogleDoc,
-	listDriveFolderChildren,
-	GOOGLE_APPS_EXPORT_MAP,
 };

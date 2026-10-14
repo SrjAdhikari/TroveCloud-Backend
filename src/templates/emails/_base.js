@@ -5,7 +5,7 @@
  * Kept intentionally spare — clean typography, neutral palette, one
  * warm accent color reserved for security callouts.
  */
-const brand = Object.freeze({
+export const brand = Object.freeze({
 	name: "TroveCloud",
 	primaryColor: "#7C3AED",
 	logoUrl: "https://assets.trovecloud.app/email/logo.png",
@@ -30,7 +30,7 @@ const brand = Object.freeze({
  * @param {string} params.bodyHtml - Pre-rendered HTML for the content card
  * @returns {string} Complete HTML document ready for dispatch
  */
-const layoutEmail = ({
+export const layoutEmail = ({
 	preheader = "",
 	title = "",
 	bodyHtml = "",
@@ -78,5 +78,3 @@ const layoutEmail = ({
 	</table>
 </body>
 </html>`;
-
-export { brand, layoutEmail };

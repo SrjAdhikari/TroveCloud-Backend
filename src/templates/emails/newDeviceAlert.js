@@ -21,7 +21,7 @@ import sanitizeInput from "../../utils/sanitizeInput.js";
  * @param {Date} params.signedInAt - When the session was created
  * @returns {string} Complete HTML email body
  */
-const NEW_DEVICE_ALERT_EMAIL_TEMPLATE = (
+export const NEW_DEVICE_ALERT_EMAIL_TEMPLATE = (
 	userName,
 	{ deviceInfo, signedInAt },
 ) => {
@@ -53,5 +53,3 @@ const NEW_DEVICE_ALERT_EMAIL_TEMPLATE = (
 		`,
 	});
 };
-
-export { NEW_DEVICE_ALERT_EMAIL_TEMPLATE };

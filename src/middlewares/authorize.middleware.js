@@ -20,7 +20,7 @@ const { UNAUTHORIZED_ACCESS, INSUFFICIENT_ROLE } = appErrorCode;
  *
  * @param {"user" | "admin" | "superadmin"} minRole
  */
-const requireRole = (minRole) => {
+export const requireRole = (minRole) => {
 	const requiredRank = ROLE_RANK[minRole];
 
 	if (typeof requiredRank !== "number") {
@@ -47,6 +47,4 @@ const requireRole = (minRole) => {
 /**
  * Shorthand for `requireRole('superadmin')`.
  */
-const requireSuperadmin = () => requireRole(ROLES.SUPERADMIN);
-
-export { requireRole, requireSuperadmin };
+export const requireSuperadmin = () => requireRole(ROLES.SUPERADMIN);

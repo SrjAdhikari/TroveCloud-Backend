@@ -53,7 +53,7 @@ const { MAX_FILE_UPLOAD_SIZE } = envConfig;
  * @returns {string} The lowercased extension, dot included
  * @throws {AppError} If the name has no simple extension
  */
-const assertUploadableFileName = (fileName) => {
+export const assertUploadableFileName = (fileName) => {
 	const extension = path.extname(fileName).toLowerCase();
 	if (!/^\.[a-z0-9]+$/.test(extension)) {
 		throw new AppError(
@@ -78,7 +78,7 @@ const assertUploadableFileName = (fileName) => {
  *   fileId: import("mongoose").Types.ObjectId, objectKey: string, contentType: string}>}
  * @throws {AppError} Bad extension, or a parent the user does not own
  */
-const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
+export const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
 	const extension = assertUploadableFileName(fileName);
 
 	const parentDir = await Directory.findOne({
@@ -123,7 +123,7 @@ const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
  *   `uploadExpiresAt` is when the pending upload is given up on
  * @throws {AppError} Bad or oversized size, unknown parent, or quota exceeded
  */
-const initiateUpload = async (
+export const initiateUpload = async (
 	parentDirId,
 	userId,
 	fileName,
@@ -229,7 +229,7 @@ const initiateUpload = async (
  * @returns {Promise<Object>} The ready file document
  * @throws {AppError} FILE_NOT_FOUND | UPLOAD_INCOMPLETE | UPLOAD_OBJECT_MISMATCH | UPLOAD_ALREADY_CONFIRMED | UPLOAD_CANCELLED
  */
-const confirmUpload = async (fileId, userId) => {
+export const confirmUpload = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId })
 		.select("+objectKey")
 		.lean();
@@ -305,7 +305,7 @@ const confirmUpload = async (fileId, userId) => {
  * @returns {Promise<Object>} The cancelled file document
  * @throws {AppError} FILE_NOT_FOUND | UPLOAD_ALREADY_CONFIRMED
  */
-const cancelUpload = async (fileId, userId) => {
+export const cancelUpload = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId }).lean();
 
 	if (!file) {
@@ -343,12 +343,4 @@ const cancelUpload = async (fileId, userId) => {
 	}
 
 	return cancelledFile;
-};
-
-export {
-	assertUploadableFileName,
-	validateAndBuildNewFile,
-	initiateUpload,
-	confirmUpload,
-	cancelUpload,
 };

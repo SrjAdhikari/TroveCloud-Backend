@@ -37,7 +37,7 @@ const clampInt = (raw, fallback, { min, max }) => {
 	return parsed;
 };
 
-const listUsersHandler = async (req, res) => {
+export const listUsersHandler = async (req, res) => {
 	const {
 		page: pageRaw,
 		limit: limitRaw,
@@ -69,7 +69,7 @@ const listUsersHandler = async (req, res) => {
 	});
 };
 
-const getUserByIdHandler = async (req, res) => {
+export const getUserByIdHandler = async (req, res) => {
 	const { id } = req.params;
 
 	const user = await getUserById(id);
@@ -81,7 +81,7 @@ const getUserByIdHandler = async (req, res) => {
 	});
 };
 
-const changeUserRoleHandler = async (req, res) => {
+export const changeUserRoleHandler = async (req, res) => {
 	const { id } = req.params;
 	const { role } = req.body ?? {};
 	const user = req.user;
@@ -95,7 +95,7 @@ const changeUserRoleHandler = async (req, res) => {
 	});
 };
 
-const suspendUserHandler = async (req, res) => {
+export const suspendUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -108,7 +108,7 @@ const suspendUserHandler = async (req, res) => {
 	});
 };
 
-const unsuspendUserHandler = async (req, res) => {
+export const unsuspendUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -121,7 +121,7 @@ const unsuspendUserHandler = async (req, res) => {
 	});
 };
 
-const forceLogoutUserHandler = async (req, res) => {
+export const forceLogoutUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -134,7 +134,7 @@ const forceLogoutUserHandler = async (req, res) => {
 	});
 };
 
-const softDeleteUserHandler = async (req, res) => {
+export const softDeleteUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -147,7 +147,7 @@ const softDeleteUserHandler = async (req, res) => {
 	});
 };
 
-const hardDeleteUserHandler = async (req, res) => {
+export const hardDeleteUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -160,7 +160,7 @@ const hardDeleteUserHandler = async (req, res) => {
 	});
 };
 
-const restoreUserHandler = async (req, res) => {
+export const restoreUserHandler = async (req, res) => {
 	const { id } = req.params;
 	const user = req.user;
 
@@ -171,16 +171,4 @@ const restoreUserHandler = async (req, res) => {
 		message: "User restored successfully",
 		data: await formatUser(restoredUser),
 	});
-};
-
-export {
-	listUsersHandler,
-	getUserByIdHandler,
-	changeUserRoleHandler,
-	suspendUserHandler,
-	unsuspendUserHandler,
-	forceLogoutUserHandler,
-	softDeleteUserHandler,
-	hardDeleteUserHandler,
-	restoreUserHandler,
 };

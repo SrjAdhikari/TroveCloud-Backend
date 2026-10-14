@@ -1,7 +1,7 @@
 //* src/utils/mimeType.js
 
 // Minimum bytes needed to decide every supported type.
-const MIN_HEADER_BYTES = 16;
+export const MIN_HEADER_BYTES = 16;
 
 /**
  * Detects a supported raster image type from a buffer's leading bytes.
@@ -9,7 +9,7 @@ const MIN_HEADER_BYTES = 16;
  * @param {Buffer} buf - Bytes from the start of the file/stream.
  * @returns {{ mime: string, ext: string } | null} The type, or null if unsupported.
  */
-const detectImageType = (buf) => {
+export const detectImageType = (buf) => {
 	if (
 		buf.length >= 3 &&
 		buf[0] === 0xff &&
@@ -45,7 +45,7 @@ const detectImageType = (buf) => {
 	return null;
 };
 
-const DEFAULT_MIME = "application/octet-stream";
+export const DEFAULT_MIME = "application/octet-stream";
 
 // Null-prototype so `.constructor` cannot resolve to the Object function.
 // No markup types: objects are served from an R2 origin, `.xml` included.
@@ -104,7 +104,7 @@ const INLINE_SAFE_TYPES = Object.freeze(
  * @param {string} [extension] - Extension with or without the leading dot.
  * @returns {string} The mapped type, or `application/octet-stream`.
  */
-const mimeFromExtension = (extension) => {
+export const mimeFromExtension = (extension) => {
 	if (typeof extension !== "string") return DEFAULT_MIME;
 	const mime = EXTENSION_MIME_MAP[extension.replace(/^\./, "").toLowerCase()];
 
@@ -112,12 +112,4 @@ const mimeFromExtension = (extension) => {
 };
 
 /** Whether this type may be served with `inline` disposition. */
-const isInlineSafe = (contentType) => INLINE_SAFE_TYPES.has(contentType);
-
-export {
-	MIN_HEADER_BYTES,
-	DEFAULT_MIME,
-	detectImageType,
-	mimeFromExtension,
-	isInlineSafe,
-};
+export const isInlineSafe = (contentType) => INLINE_SAFE_TYPES.has(contentType);

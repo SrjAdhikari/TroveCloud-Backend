@@ -12,6 +12,4 @@ const name = z
 		"Name is required and must be between 3 and 50 characters",
 	);
 
-const updateProfileSchema = z.object({ name });
-
-export { updateProfileSchema };
+export const updateProfileSchema = z.object({ name });

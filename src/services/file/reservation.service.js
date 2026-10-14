@@ -9,21 +9,21 @@ import { updateAncestorDirectoryStats } from "../directory.service.js";
 import { deleteObject, UPLOAD_URL_TTL_SECONDS } from "../../lib/r2.js";
 import { FIFTEEN_MINUTES_MS, ONE_HOUR_MS } from "../../utils/date.js";
 
-const MIN_UPLOAD_BYTES_PER_SECOND = 16_000;
+export const MIN_UPLOAD_BYTES_PER_SECOND = 16_000;
 
 // Shortest and longest time an upload is given to finish, on top of the upload link's lifetime.
-const UPLOAD_WINDOW_MS = FIFTEEN_MINUTES_MS;
-const UPLOAD_WINDOW_MAX_MS = ONE_HOUR_MS;
+export const UPLOAD_WINDOW_MS = FIFTEEN_MINUTES_MS;
+export const UPLOAD_WINDOW_MAX_MS = ONE_HOUR_MS;
 
 // The maximum time a pending upload can be reserved against the user's quota.
-const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + UPLOAD_WINDOW_MAX_MS;
+export const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + UPLOAD_WINDOW_MAX_MS;
 
-const isUploadStillLive = (file) =>
+export const isUploadStillLive = (file) =>
 	file.status !== "ready" &&
 	(!file.uploadExpiresAt || file.uploadExpiresAt > new Date());
 
 /** Calculates the expiry time for a pending upload based on the declared size and minimum upload speed */
-const calculateUploadExpiry = (declaredSize) => {
+export const calculateUploadExpiry = (declaredSize) => {
 	const transferMs = (declaredSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1000;
 
 	return new Date(
@@ -37,7 +37,7 @@ const calculateUploadExpiry = (declaredSize) => {
  * Releases the reserved bytes for a pending upload, and deletes its row if it is still pending.
  * Returns true if the row was deleted, false if it was already gone or not pending.
  */
-const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
+export const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
 	const mongooseSession = await mongoose.startSession();
 	let released = false;
 
@@ -70,12 +70,12 @@ const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
 	return released;
 };
 
-const matchSizeAndType = (fileMetadata, file) =>
+export const matchSizeAndType = (fileMetadata, file) =>
 	Boolean(fileMetadata) &&
 	fileMetadata.size === file.size &&
 	fileMetadata.contentType === file.contentType;
 
-const removeObject = async (objectKey, fileId) => {
+export const removeObject = async (objectKey, fileId) => {
 	try {
 		await deleteObject(objectKey);
 	} catch (error) {
@@ -83,16 +83,4 @@ const removeObject = async (objectKey, fileId) => {
 			`Failed to remove the object for file ${fileId}: ${error.name} ${error.$metadata?.httpStatusCode ?? ""}`.trim(),
 		);
 	}
-};
-
-export {
-	MIN_UPLOAD_BYTES_PER_SECOND,
-	MAX_UPLOAD_RESERVATION_MS,
-	UPLOAD_WINDOW_MS,
-	UPLOAD_WINDOW_MAX_MS,
-	isUploadStillLive,
-	calculateUploadExpiry,
-	releaseReservedBytes,
-	matchSizeAndType,
-	removeObject,
 };

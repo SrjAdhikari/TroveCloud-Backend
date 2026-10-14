@@ -13,7 +13,7 @@ const driveItemSchema = z.object({
 	mimeType: z.string().trim().nonempty("each item requires a string mimeType"),
 });
 
-const importDriveSchema = z.object({
+export const importDriveSchema = z.object({
 	accessToken: z
 		.string()
 		.trim()
@@ -32,5 +32,3 @@ const importDriveSchema = z.object({
 		.regex(OBJECT_ID_PATTERN, "Invalid directory id")
 		.optional(),
 });
-
-export { importDriveSchema };

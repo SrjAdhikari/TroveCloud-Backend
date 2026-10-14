@@ -18,7 +18,7 @@ const { RATE_LIMITED } = appErrorCode;
  * @param {import("express").Request} req
  * @returns {string} the identifier the limiter buckets on
  */
-const clientKey = (req) => {
+export const clientKey = (req) => {
 	if (req.user?._id) return req.user._id.toString();
 	const ip = req.headers["cf-connecting-ip"] ?? req.ip;
 	return ipKeyGenerator(ip, 56);
@@ -29,7 +29,7 @@ const clientKey = (req) => {
  * an AppError through the global error handler — instead of the library's
  * default plaintext "Too many requests" body, which breaks the response contract.
  */
-const rateLimitExceededHandler = (req, res, next) =>
+export const rateLimitExceededHandler = (req, res, next) =>
 	next(
 		new AppError(
 			"Too many requests, please try again later",
@@ -63,26 +63,12 @@ const createLimiter = ({ windowMs, limit }) =>
 		handler: rateLimitExceededHandler,
 	});
 
-const globalLimiter = createLimiter(RATE_LIMITS.global);
-const authLimiter = createLimiter(RATE_LIMITS.auth);
-const oauthLimiter = createLimiter(RATE_LIMITS.oauth);
-const readLimiter = createLimiter(RATE_LIMITS.read);
-const mutationLimiter = createLimiter(RATE_LIMITS.mutation);
-const destructiveLimiter = createLimiter(RATE_LIMITS.destructive);
-const hardDeleteLimiter = createLimiter(RATE_LIMITS.hardDelete);
-const uploadLimiter = createLimiter(RATE_LIMITS.upload);
-const driveLimiter = createLimiter(RATE_LIMITS.drive);
-
-export {
-	clientKey,
-	rateLimitExceededHandler,
-	globalLimiter,
-	authLimiter,
-	oauthLimiter,
-	readLimiter,
-	mutationLimiter,
-	destructiveLimiter,
-	hardDeleteLimiter,
-	uploadLimiter,
-	driveLimiter,
-};
+export const globalLimiter = createLimiter(RATE_LIMITS.global);
+export const authLimiter = createLimiter(RATE_LIMITS.auth);
+export const oauthLimiter = createLimiter(RATE_LIMITS.oauth);
+export const readLimiter = createLimiter(RATE_LIMITS.read);
+export const mutationLimiter = createLimiter(RATE_LIMITS.mutation);
+export const destructiveLimiter = createLimiter(RATE_LIMITS.destructive);
+export const hardDeleteLimiter = createLimiter(RATE_LIMITS.hardDelete);
+export const uploadLimiter = createLimiter(RATE_LIMITS.upload);
+export const driveLimiter = createLimiter(RATE_LIMITS.drive);

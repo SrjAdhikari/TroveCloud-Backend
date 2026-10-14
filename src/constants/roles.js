@@ -6,7 +6,7 @@
  * @readonly
  * @enum {string}
  */
-const ROLES = Object.freeze({
+export const ROLES = Object.freeze({
 	USER: "user",
 	ADMIN: "admin",
 	SUPERADMIN: "superadmin",
@@ -18,10 +18,8 @@ const ROLES = Object.freeze({
  *
  * @readonly
  */
-const ROLE_RANK = Object.freeze({
+export const ROLE_RANK = Object.freeze({
 	[ROLES.USER]: 1,
 	[ROLES.ADMIN]: 2,
 	[ROLES.SUPERADMIN]: 3,
 });
-
-export { ROLES, ROLE_RANK };

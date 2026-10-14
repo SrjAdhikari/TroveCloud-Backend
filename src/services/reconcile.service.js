@@ -20,7 +20,7 @@ import AppError from "../errors/AppError.js";
 const { CONFLICT } = httpStatus;
 const { ORPHAN_RATIO_EXCEEDED } = appErrorCode;
 
-const DEFAULT_MAX_ORPHAN_RATIO = 0.2;
+export const DEFAULT_MAX_ORPHAN_RATIO = 0.2;
 
 // The `ownedKeys` functions are per prefix because the ownership check is per collection.
 // A key that looks like a file but is actually a profile picture is not owned by any File row, and vice versa.
@@ -55,9 +55,9 @@ const SCAN_TARGETS = [
 ];
 
 // Exported so a caller reporting what was covered cannot hold a stale copy.
-const SCANNED_PREFIXES = SCAN_TARGETS.map((target) => target.prefix);
+export const SCANNED_PREFIXES = SCAN_TARGETS.map((target) => target.prefix);
 
-const scanForOrphans = async () => {
+export const scanForOrphans = async () => {
 	// The floor is the oldest lastModified an object can have to be considered for deletion.
 	const floorMs = Date.now() - MAX_UPLOAD_RESERVATION_MS;
 
@@ -119,7 +119,7 @@ const scanForOrphans = async () => {
 	return report;
 };
 
-const reclaimOrphans = async (
+export const reclaimOrphans = async (
 	candidates,
 	{ scanned, maxRatio = DEFAULT_MAX_ORPHAN_RATIO } = {},
 ) => {
@@ -155,11 +155,4 @@ const reclaimOrphans = async (
 	);
 
 	return { ratio, deleted, errors };
-};
-
-export {
-	DEFAULT_MAX_ORPHAN_RATIO,
-	SCANNED_PREFIXES,
-	scanForOrphans,
-	reclaimOrphans,
 };

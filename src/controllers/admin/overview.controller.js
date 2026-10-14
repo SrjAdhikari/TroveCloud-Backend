@@ -5,7 +5,7 @@ import { getSystemOverview } from "../../services/admin/overview.service.js";
 
 const { OK } = httpStatus;
 
-const getOverviewHandler = async (req, res) => {
+export const getOverviewHandler = async (req, res) => {
 	const data = await getSystemOverview();
 
 	res.status(OK).json({
@@ -14,5 +14,3 @@ const getOverviewHandler = async (req, res) => {
 		data,
 	});
 };
-
-export { getOverviewHandler };

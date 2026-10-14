@@ -6,7 +6,7 @@
  * breakdown. Extensions are matched lowercase, with or without a leading dot.
  */
 
-const CATEGORY_ICONS = Object.freeze({
+export const CATEGORY_ICONS = Object.freeze({
 	Documents: "file-text",
 	Images: "image",
 	Videos: "video",
@@ -77,9 +77,7 @@ const EXTENSION_CATEGORY = Object.freeze({
  *   case-insensitive; a missing leading dot or empty/undefined value is tolerated.
  * @returns {string} One of the keys in `CATEGORY_ICONS`; "Other" when unknown.
  */
-const categorizeExtension = (extension) => {
+export const categorizeExtension = (extension) => {
 	const normalized = (extension ?? "").replace(/^\./, "").toLowerCase();
 	return EXTENSION_CATEGORY[normalized] ?? "Other";
 };
-
-export { categorizeExtension, CATEGORY_ICONS };

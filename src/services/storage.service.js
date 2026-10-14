@@ -21,7 +21,7 @@ import {
  * @param {number} totalStorageLimit - The user's total storage limit in bytes.
  * @returns {Promise<{used: number, total: number, breakdown: Array<{category: string, size: number, icon: string}>}>}
  */
-const getStorageUsage = async (userId, totalStorageLimit) => {
+export const getStorageUsage = async (userId, totalStorageLimit) => {
 	await settleExpiredPendingFiles(userId);
 
 	const rootDir = await Directory.findOne({ userId, parentDirId: null })
@@ -51,5 +51,3 @@ const getStorageUsage = async (userId, totalStorageLimit) => {
 
 	return { used: usedBytes, total: totalStorageLimit, breakdown };
 };
-
-export { getStorageUsage };

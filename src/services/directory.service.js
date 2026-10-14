@@ -31,7 +31,7 @@ const ROOT_DISPLAY_NAME = "My Files";
  * @returns {Promise<Object>} Directory metadata, breadcrumb, path, files, and child directories with stats
  * @throws {AppError} If the directory does not exist or the user does not own it
  */
-const getDirectory = async (directoryId, userId) => {
+export const getDirectory = async (directoryId, userId) => {
 	const directory = await Directory.findOne({
 		_id: directoryId,
 		userId,
@@ -88,7 +88,7 @@ const getDirectory = async (directoryId, userId) => {
  * @returns {Promise<Object>} The newly created directory document
  * @throws {AppError} If the parent directory does not exist or the user does not own it
  */
-const createDirectory = async (parentDirId, dirname, userId) => {
+export const createDirectory = async (parentDirId, dirname, userId) => {
 	const parentDir = await Directory.findOne({
 		_id: parentDirId,
 		userId,
@@ -143,7 +143,7 @@ const createDirectory = async (parentDirId, dirname, userId) => {
  * @returns {Promise<Object>} The updated directory document
  * @throws {AppError} If the directory does not exist or the user does not own it
  */
-const updateDirectory = async (directoryId, newDirName, userId) => {
+export const updateDirectory = async (directoryId, newDirName, userId) => {
 	const directory = await Directory.findOne({
 		_id: directoryId,
 		userId,
@@ -179,7 +179,7 @@ const updateDirectory = async (directoryId, newDirName, userId) => {
  * @returns {Promise<Object>} The deleted directory document
  * @throws {AppError} If the directory does not exist or the user does not own it
  */
-const deleteDirectory = async (directoryId, userId) => {
+export const deleteDirectory = async (directoryId, userId) => {
 	// Step 1: Find the directory to delete
 	const rootDir = await Directory.findOne({ _id: directoryId, userId }).lean();
 
@@ -305,7 +305,7 @@ const deleteDirectory = async (directoryId, userId) => {
  * @param {{ bytes?: number, files?: number, folders?: number }} delta
  * @param {import("mongoose").ClientSession} [session]
  */
-const updateAncestorDirectoryStats = async (
+export const updateAncestorDirectoryStats = async (
 	startDirId,
 	{ bytes = 0, files = 0, folders = 0 },
 	session,
@@ -340,7 +340,7 @@ const updateAncestorDirectoryStats = async (
  * @param {string} userId
  * @returns {Promise<Array<{_id: import("mongoose").Types.ObjectId|string, name: string}>>}
  */
-const resolveDirectoryNames = async (dirIds, userId) => {
+export const resolveDirectoryNames = async (dirIds, userId) => {
 	if (!dirIds?.length) return [];
 
 	const dirs = await Directory.find(
@@ -351,13 +351,4 @@ const resolveDirectoryNames = async (dirIds, userId) => {
 	const nameById = new Map(dirs.map((dir) => [dir._id.toString(), dir.name]));
 
 	return dirIds.map((id) => ({ _id: id, name: nameById.get(id.toString()) }));
-};
-
-export {
-	getDirectory,
-	createDirectory,
-	updateDirectory,
-	deleteDirectory,
-	updateAncestorDirectoryStats,
-	resolveDirectoryNames,
 };

@@ -15,7 +15,7 @@ const { MAX_ALLOWED_DEVICES } = envConfig;
  * @param {import("mongoose").Types.ObjectId | string} userId - User whose sessions should be capped.
  * @returns {Promise<void>}
  */
-const enforceDeviceLimit = async (userId) => {
+export const enforceDeviceLimit = async (userId) => {
 	const activeSessionCount = await Session.countDocuments({ userId });
 
 	// Evict the oldest session first (FIFO) so the user's most recently
@@ -24,5 +24,3 @@ const enforceDeviceLimit = async (userId) => {
 		await Session.findOneAndDelete({ userId }, { sort: { createdAt: 1 } });
 	}
 };
-
-export { enforceDeviceLimit };

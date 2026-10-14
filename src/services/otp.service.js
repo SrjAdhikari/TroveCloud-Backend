@@ -12,7 +12,7 @@ import { TEN_MINUTES_MS, tenMinutesFromNow } from "../utils/date.js";
  * Generates a cryptic 6-digit OTP alongside a SHA-256 hashed version
  * @returns {{ plainOTP: string, hashedOTP: string }}
  */
-const generateOTP = () => {
+export const generateOTP = () => {
 	const plainOTP = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
 	const hashedOTP = crypto.createHash("sha256").update(plainOTP).digest("hex");
 
@@ -27,7 +27,7 @@ const generateOTP = () => {
  * @param {string} storedHash - The hashed OTP retrieved from MongoDB
  * @returns {boolean} True if the OTP is perfectly valid
  */
-const isValidOTP = (inputOTP, storedHash) => {
+export const isValidOTP = (inputOTP, storedHash) => {
 	const inputHash = crypto
 		.createHash("sha256")
 		.update(String(inputOTP))
@@ -45,7 +45,7 @@ const isValidOTP = (inputOTP, storedHash) => {
  * @param {string} email - The user's email address
  * @param {string} otp - The 6-digit OTP
  */
-const sendOTP = async (name, email, otp) => {
+export const sendOTP = async (name, email, otp) => {
 	await sendEmail(
 		email,
 		"Verify your email address",
@@ -60,7 +60,7 @@ const sendOTP = async (name, email, otp) => {
  * @param {string} email - The user's email address
  * @param {string} otp - The 6-digit OTP
  */
-const sendPasswordResetOTP = async (name, email, otp) => {
+export const sendPasswordResetOTP = async (name, email, otp) => {
 	await sendEmail(
 		email,
 		"Reset your password",
@@ -74,7 +74,7 @@ const sendPasswordResetOTP = async (name, email, otp) => {
  * @param {Object} user - The user document to update
  * @returns {Promise<string>} The plain OTP
  */
-const issueOTPToUser = async (user) => {
+export const issueOTPToUser = async (user) => {
 	const { plainOTP, hashedOTP } = generateOTP();
 
 	user.otp = hashedOTP;
@@ -90,7 +90,7 @@ const issueOTPToUser = async (user) => {
  * @param {Date} otpExpiresAt - The expiry time of the OTP
  * @returns {boolean} True if the OTP has expired
  */
-const isOTPExpired = (otpExpiresAt) => {
+export const isOTPExpired = (otpExpiresAt) => {
 	if (!otpExpiresAt) return true;
 	return otpExpiresAt.getTime() < Date.now();
 };
@@ -102,18 +102,8 @@ const isOTPExpired = (otpExpiresAt) => {
  * @param {number} cooldownMs - The cooldown duration in milliseconds
  * @returns {boolean} True if the OTP cooldown is active
  */
-const isOTPCooldownActive = (otpExpiresAt, cooldownMs) => {
+export const isOTPCooldownActive = (otpExpiresAt, cooldownMs) => {
 	if (!otpExpiresAt) return false;
 	const otpCreatedAt = otpExpiresAt.getTime() - TEN_MINUTES_MS;
 	return Date.now() - otpCreatedAt < cooldownMs;
-};
-
-export {
-	generateOTP,
-	isValidOTP,
-	sendOTP,
-	sendPasswordResetOTP,
-	issueOTPToUser,
-	isOTPExpired,
-	isOTPCooldownActive,
 };

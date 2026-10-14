@@ -11,8 +11,6 @@ export const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 export const FIVE_MINUTES_SECONDS = 5 * 60;
 export const ONE_HOUR_SECONDS = 60 * 60;
 
-const tenMinutesFromNow = () => new Date(Date.now() + TEN_MINUTES_MS);
-const oneHourFromNow = () => new Date(Date.now() + ONE_HOUR_MS);
-const sevenDaysFromNow = () => new Date(Date.now() + SEVEN_DAYS_MS);
-
-export { tenMinutesFromNow, oneHourFromNow, sevenDaysFromNow };
+export const tenMinutesFromNow = () => new Date(Date.now() + TEN_MINUTES_MS);
+export const oneHourFromNow = () => new Date(Date.now() + ONE_HOUR_MS);
+export const sevenDaysFromNow = () => new Date(Date.now() + SEVEN_DAYS_MS);
