@@ -25,16 +25,8 @@ const normalizeFileName = (file) => {
 	return `${path.basename(file.name, named)}${file.extension}`;
 };
 
-/**
- * Retrieves a ready file owned by the user. A pending upload is quota
- * bookkeeping, not a file the user has, so it stays invisible here.
- *
- * @param {string} fileId - The ID of the file to fetch
- * @param {string} userId - The owner's ID, for the ownership check
- *
- * @returns {Promise<Object>} The file document
- * @throws {AppError} If the file does not exist or the user does not own it
- */
+// Gets a file the user owns.
+// Unfinished uploads are skipped: they only hold storage space and aren't real files yet.
 export const getFile = async (fileId, userId) => {
 	const file = await File.findOne({
 		_id: fileId,
@@ -49,16 +41,6 @@ export const getFile = async (fileId, userId) => {
 	return file;
 };
 
-/**
- * Mints a short-lived signed GET for a file's bytes.
- *
- * @param {string} fileId - The ID of the file to read
- * @param {string} userId - The owner's ID, for the ownership check
- * @param {{ download?: boolean }} [options] - `download` forces an attachment
- *
- * @returns {Promise<{url: string, expiresAt: Date}>} Signed URL and its expiry
- * @throws {AppError} If the file does not exist or the user does not own it
- */
 export const createDownloadUrl = async (fileId, userId, options = {}) => {
 	const file = await File.findOne({ _id: fileId, userId, status: "ready" })
 		.select("+objectKey")
@@ -82,16 +64,6 @@ export const createDownloadUrl = async (fileId, userId, options = {}) => {
 	};
 };
 
-/**
- * Rename a file owned by the authenticated user.
- *
- * @param {string} fileId - The ID of the file to rename
- * @param {string} newFileName - The new name for the file
- * @param {string} userId - The owner's ID, for the ownership check
- *
- * @returns {Promise<Object>} The updated file document
- * @throws {AppError} Missing, still a pending upload, or not owned by the user
- */
 export const updateFile = async (fileId, newFileName, userId) => {
 	const updatedFile = await File.findOneAndUpdate(
 		{ _id: fileId, userId, status: "ready" },
@@ -106,15 +78,6 @@ export const updateFile = async (fileId, newFileName, userId) => {
 	return updatedFile;
 };
 
-/**
- * Deletes a file's DB record and its stored object.
- *
- * @param {string} fileId - The ID of the file to delete
- * @param {string} userId - The owner's ID, for the ownership check
- *
- * @returns {Promise<Object>} The deleted file document
- * @throws {AppError} Missing, still uploading, or not owned by the user
- */
 export const deleteFile = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId })
 		.select("+objectKey")

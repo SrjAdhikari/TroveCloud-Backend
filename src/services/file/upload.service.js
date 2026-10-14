@@ -44,15 +44,7 @@ const {
 
 const { MAX_FILE_UPLOAD_SIZE } = envConfig;
 
-/**
- * Rejects a name that does not end in a simple extension. Callers that fetch
- * the bytes from elsewhere run it first, so a bad name never opens a transfer.
- *
- * @param {string} fileName - The sanitized filename provided by the caller
- *
- * @returns {string} The lowercased extension, dot included
- * @throws {AppError} If the name has no simple extension
- */
+// Code that fetches the file from somewhere else runs this first, so a bad name is caught before any download starts.
 export const assertUploadableFileName = (fileName) => {
 	const extension = path.extname(fileName).toLowerCase();
 	if (!/^\.[a-z0-9]+$/.test(extension)) {
@@ -66,18 +58,7 @@ export const assertUploadableFileName = (fileName) => {
 	return extension;
 };
 
-/**
- * Verifies the parent directory belongs to the user and creates the new
- * file's identity. Shared by both upload paths so they cannot drift apart.
- *
- * @param {string} parentDirId - The ID of the target parent directory
- * @param {string} userId - The owner's ID, for the ownership check
- * @param {string} fileName - The sanitized filename provided by the caller
- *
- * @returns {Promise<{parentDir: Object, extension: string,
- *   fileId: import("mongoose").Types.ObjectId, objectKey: string, contentType: string}>}
- * @throws {AppError} Bad extension, or a parent the user does not own
- */
+// Used by both ways of uploading, so their rules always stay the same.
 export const validateAndBuildNewFile = async (parentDirId, userId, fileName) => {
 	const extension = assertUploadableFileName(fileName);
 
@@ -109,20 +90,7 @@ export const validateAndBuildNewFile = async (parentDirId, userId, fileName) => 
 	};
 };
 
-/**
- * Mints a presigned PUT and reserves the declared bytes against the quota.
- *
- * @param {string} parentDirId - The ID of the target parent directory
- * @param {string} userId - The owner's ID, for the ownership check
- * @param {string} fileName - The sanitized filename provided by the user
- * @param {number} declaredSize - The byte length the client promises to upload
- * @param {number} totalStorageLimit - The user's quota in bytes (from req.user)
- *
- * @returns {Promise<{fileId: string, uploadUrl: string, contentType: string,
- *   expiresAt: Date, uploadExpiresAt: Date}>} `expiresAt` is the URL TTL;
- *   `uploadExpiresAt` is when the pending upload is given up on
- * @throws {AppError} Bad or oversized size, unknown parent, or quota exceeded
- */
+// expiresAt: when the upload link stops working. uploadExpiresAt: when an unfinished upload is given up.
 export const initiateUpload = async (
 	parentDirId,
 	userId,
@@ -218,17 +186,7 @@ export const initiateUpload = async (
 	};
 };
 
-/**
- * Confirms that a presigned PUT completed successfully, and promotes the
- * file from a pending upload to a real file. Until it is called the declared
- * bytes stay reserved against the owner's quota (see issue #86).
- *
- * @param {string} fileId - The ID of the pending file
- * @param {string} userId - The owner's ID, for the ownership check
- *
- * @returns {Promise<Object>} The ready file document
- * @throws {AppError} FILE_NOT_FOUND | UPLOAD_INCOMPLETE | UPLOAD_OBJECT_MISMATCH | UPLOAD_ALREADY_CONFIRMED | UPLOAD_CANCELLED
- */
+// Until this runs, the size the user declared still counts against their storage (details in GitHub issue #86).
 export const confirmUpload = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId })
 		.select("+objectKey")
@@ -296,15 +254,7 @@ export const confirmUpload = async (fileId, userId) => {
 	return updatedFile;
 };
 
-/**
- * Cancels a pending upload by shortening its window and marking it cancelled; the sweep refunds the bytes and drops the object
- *
- * @param {string} fileId - The ID of the pending file
- * @param {string} userId - The owner's ID, for the ownership check
- *
- * @returns {Promise<Object>} The cancelled file document
- * @throws {AppError} FILE_NOT_FOUND | UPLOAD_ALREADY_CONFIRMED
- */
+// Only marks the upload as cancelled and ends its time early. The cleanup job later gives the space back and deletes the stored file.
 export const cancelUpload = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId }).lean();
 

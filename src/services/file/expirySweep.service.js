@@ -25,7 +25,6 @@ const findExpiredFiles = async (userId, excludedFileId) => {
 		.lean();
 };
 
-/** Classifies expired files by checking if their objects exist and match the expected size and type */
 const classifyExpiredObjects = async (files) => {
 	const outcomes = await Promise.all(
 		files.map(async (file) => {
@@ -49,7 +48,6 @@ const classifyExpiredObjects = async (files) => {
 	return new Map(outcomes);
 };
 
-/** Promotes or refunds expired files based on their classification */
 const promoteOrRefundExpiredFiles = async (
 	expiredFiles,
 	objectOutcomes,
@@ -93,7 +91,6 @@ const promoteOrRefundExpiredFiles = async (
 	return deletedFiles;
 };
 
-/** Releases expired files for a user, excluding a specific file if provided */
 const releaseExpiredFiles = async (userId, excludedFileId) => {
 	let deletedFiles = [];
 
@@ -127,7 +124,7 @@ const releaseExpiredFiles = async (userId, excludedFileId) => {
 	return deletedFiles;
 };
 
-/** Settles a user's expired reservations and removes the objects of the refunded rows */
+// Also deletes the stored files of the uploads whose space it gives back.
 export const settleExpiredPendingFiles = async (userId, excludedFileId) => {
 	const deletedFiles = await releaseExpiredFiles(userId, excludedFileId);
 

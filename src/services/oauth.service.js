@@ -18,20 +18,8 @@ const { CONFLICT, UNAUTHORIZED, FORBIDDEN } = httpStatus;
 const { PROVIDER_MISMATCH, UNAUTHORIZED_ACCESS, ACCOUNT_SUSPENDED } =
 	appErrorCode;
 
-/**
- * Shared OAuth sign-in flow: finds or creates the user, then issues a session.
- *
- * Provider-agnostic — callers must first exchange the provider's token/code and
- * produce a verified, normalized profile (including any email-verified checks)
- * before calling this function.
- *
- * @param {"google"|"github"} provider - OAuth provider the user signed in with.
- * @param {{ name: string, email: string, picture: string }} profile - Normalized profile from the provider.
- * @param {Object} deviceInfo - Parsed device metadata attached to the new session.
- * @returns {Promise<{ session: Object, isNewUser: boolean }>} The issued session and whether a new account was created.
- *
- * @throws {AppError} `PROVIDER_MISMATCH` — the email already belongs to an account registered with a different provider.
- */
+// Signs in a Google or GitHub user, creating the account the first time.
+// Before calling this, confirm the sign-in with the provider and check that the email is verified.
 export const loginOrCreateOAuthUser = async (provider, profile, deviceInfo) => {
 	const { name: providerName, email, picture } = profile;
 

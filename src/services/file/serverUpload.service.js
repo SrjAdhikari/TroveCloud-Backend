@@ -24,7 +24,6 @@ const { FILE_UPLOAD_FAILED, FILE_TOO_LARGE } = appErrorCode;
 
 const { MAX_FILE_UPLOAD_SIZE } = envConfig;
 
-/** Rolls back a failed upload by releasing its reserved bytes and deleting its object if no row names it */
 const rollbackFailedUpload = async (fileId, parentDirId, objectKey) => {
 	// Nothing was reserved but the claim's file count, so the refund is 0 bytes.
 	const released = await releaseReservedBytes(fileId, parentDirId, 0);
@@ -35,11 +34,8 @@ const rollbackFailedUpload = async (fileId, parentDirId, objectKey) => {
 	}
 };
 
-/**
- * Writes the 0-byte pending row that claims the key before any bytes are read,
- * so no object can exist without a row naming it. Only the file count is
- * reserved here; the streamed bytes are counted once they are known.
- */
+// Saves an empty upload record before reading any bytes, so every stored file has a record pointing to it.
+// Only the file count is reserved here; the bytes are counted once the real size is known.
 const createUploadClaim = async (
 	{ parentDir, extension, fileId, objectKey, contentType },
 	userId,
@@ -90,23 +86,8 @@ const createUploadClaim = async (
 	}
 };
 
-/**
- * Uploads a file from a server-held stream — Drive import, where the bytes
- * reach the server first so a presigned PUT is not an option. Returns the raw
- * document, key included: every caller is server-side.
- *
- * @param {string} parentDirId - The ID of the target parent directory
- * @param {string} userId - The owner's ID, for the ownership check
- * @param {string} fileName - The sanitized filename provided by the caller
- * @param {import("node:stream").Readable} fileStream - The bytes to store
- * @param {number} totalStorageLimit - Quota in bytes; must be finite and non-negative
- * @param {Object} [options]
- * @param {number} [options.perFileCap=MAX_FILE_UPLOAD_SIZE] - Per-file byte ceiling
- * @param {boolean} [options.reclaim=true] - Sweep expired reservations once on a quota rejection
- *
- * @returns {Promise<Object>} The newly created file document (lean)
- * @throws {AppError} Unknown parent, bad extension, quota exceeded, or upload failure
- */
+// Used when the server already holds the file (Drive import).
+// Returns the full record, including the storage key, so only call it from server code.
 export const uploadFileFromServer = async (
 	parentDirId,
 	userId,

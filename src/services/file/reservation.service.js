@@ -15,14 +15,12 @@ export const MIN_UPLOAD_BYTES_PER_SECOND = 16_000;
 export const UPLOAD_WINDOW_MS = FIFTEEN_MINUTES_MS;
 export const UPLOAD_WINDOW_MAX_MS = ONE_HOUR_MS;
 
-// The maximum time a pending upload can be reserved against the user's quota.
 export const MAX_UPLOAD_RESERVATION_MS = UPLOAD_URL_TTL_SECONDS * 1000 + UPLOAD_WINDOW_MAX_MS;
 
 export const isUploadStillLive = (file) =>
 	file.status !== "ready" &&
 	(!file.uploadExpiresAt || file.uploadExpiresAt > new Date());
 
-/** Calculates the expiry time for a pending upload based on the declared size and minimum upload speed */
 export const calculateUploadExpiry = (declaredSize) => {
 	const transferMs = (declaredSize / MIN_UPLOAD_BYTES_PER_SECOND) * 1000;
 
@@ -33,10 +31,7 @@ export const calculateUploadExpiry = (declaredSize) => {
 	);
 };
 
-/**
- * Releases the reserved bytes for a pending upload, and deletes its row if it is still pending.
- * Returns true if the row was deleted, false if it was already gone or not pending.
- */
+// Also deletes the record if the upload is unfinished. Returns true only if it deleted it; false if it was already gone or finished.
 export const releaseReservedBytes = async (fileId, parentDirId, bytes) => {
 	const mongooseSession = await mongoose.startSession();
 	let released = false;

@@ -13,7 +13,6 @@ const { STORAGE_LIMIT_EXCEEDED, INVALID_STORAGE_LIMIT } = appErrorCode;
 
 export const isValidStorageLimit = (limit) => Number.isFinite(limit) && limit >= 0;
 
-/** Reads a user's stored bytes from the root directory's denormalized size */
 export const getStoredBytes = async (userId, session) => {
 	const rootDir = await Directory.findOne(
 		{ userId, parentDirId: null },
@@ -42,11 +41,7 @@ export const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 	}
 };
 
-/**
- * Attempts to reserve quota for a new file, and reclaims expired files if the attempt fails.
- * If that frees up enough space, it is retried once. A second failure propagates unchanged.
- * With `reclaim` off, a quota rejection propagates without the sweep.
- */
+// If storage is full, clears out expired uploads and tries once more. With `reclaim` off, it fails right away.
 export const reserveQuotaWithReclaim = async (
 	userId,
 	reserve,

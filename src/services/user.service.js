@@ -92,16 +92,6 @@ const detectVerifiedImageType = (buffer, declaredType) => {
 	return detected.mime;
 };
 
-/**
- * Reads the request body into a Buffer, enforcing the declared Content-Length
- * and the maximum allowed size. Throws if the body is incomplete or too large.
- *
- * @param {import("node:stream").Readable} body - Raw request body.
- * @param {number} declaredLength - The request's Content-Length.
- *
- * @returns {Promise<Buffer>}
- * @throws {AppError} IMAGE_TOO_LARGE | UPLOAD_INCOMPLETE
- */
 const readProfilePictureBody = async (body, declaredLength) => {
 	const chunks = [];
 	let size = 0;
@@ -127,16 +117,6 @@ const readProfilePictureBody = async (body, declaredLength) => {
 	return Buffer.concat(chunks);
 };
 
-/**
- * Updates the authenticated user's display name and returns the user in the
- * same projection as `GET /api/auth/me` (sensitive fields excluded).
- *
- * @param {string} userId - The authenticated user's id.
- * @param {string} name - The validated, trimmed new name.
- *
- * @returns {Promise<Object>} The updated lean user, minus password/otp/otpExpiresAt.
- * @throws {AppError} `USER_NOT_FOUND` if the user no longer exists (rare TOCTOU race).
- */
 export const updateProfile = async (userId, name) => {
 	const user = await User.findByIdAndUpdate(
 		userId,
@@ -153,16 +133,6 @@ export const updateProfile = async (userId, name) => {
 	return user;
 };
 
-/**
- * Uploads or replaces the authenticated user's profile picture.
- *
- * @param {string} userId - Authenticated user's id.
- * @param {import("node:stream").Readable} body - Raw request body.
- * @param {{contentType?: string, contentLength?: string}} headers - Request headers.
- *
- * @returns {Promise<Object>} Updated lean user, minus password/otp/otpExpiresAt.
- * @throws {AppError} INVALID_IMAGE_TYPE | IMAGE_TOO_LARGE | INVALID_INPUT | UPLOAD_INCOMPLETE | USER_NOT_FOUND
- */
 export const uploadProfilePicture = async (userId, body, headers = {}) => {
 	const { declaredType, declaredLength } =
 		validateProfilePictureHeaders(headers);
@@ -213,13 +183,6 @@ export const uploadProfilePicture = async (userId, body, headers = {}) => {
 	return updatedUser;
 };
 
-/**
- * Resolves a user's profile picture URL, either by presigning the R2 object
- * or returning the existing `profilePicture` field if present.
- *
- * @param {{profilePictureKey?: string, profilePicture?: string}|null} user
- * @returns {Promise<string|null>}
- */
 export const resolveProfilePictureUrl = async (user) => {
 	const { profilePictureKey, profilePicture } = user ?? {};
 
@@ -241,13 +204,6 @@ export const resolveProfilePictureUrl = async (user) => {
 	return profilePicture ?? null;
 };
 
-/**
- * Formats a lean user document for API responses, excluding sensitive fields
- * and resolving the profile picture URL if applicable.
- *
- * @param {Object|null} user - A lean user document.
- * @returns {Promise<Object|null>}
- */
 export const formatUser = async (user) => {
 	if (!user) return user;
 

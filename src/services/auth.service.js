@@ -55,15 +55,6 @@ const {
 	ACCOUNT_SUSPENDED,
 } = appErrorCode;
 
-/**
- * Resolves user registration including unverified user re-registration edge-cases.
- * Generates OTP and updates auto-deletion limits before dispatching the email.
- *
- * @param {string} name - The user's full name
- * @param {string} email - The user's email address
- * @param {string} password - The user's unhashed password
- * @throws {AppError} If the user already exists and is fully verified
- */
 export const createUser = async (name, email, password) => {
 	const user = await User.findOne({ email });
 
@@ -95,16 +86,7 @@ export const createUser = async (name, email, password) => {
 	await sendOTP(name, email, plainOTP);
 };
 
-/**
- * Verifies a 6-digit OTP to finalize account registration.
- * Executes within a MongoDB transaction to sequentially mark the user
- * as verified and generate their default root directory.
- *
- * @param {string} email - The user's email address
- * @param {string} otp - The raw 6-digit OTP string
- * @returns {Promise<Object>} The verified user document
- * @throws {AppError} If the user is missing, or the OTP is invalid/expired
- */
+// Also creates the user's root folder.
 export const verifyOTP = async (email, otp) => {
 	const user = await User.findOne({ email, isVerified: false }).select(
 		"+otp +otpExpiresAt",
@@ -154,13 +136,8 @@ export const verifyOTP = async (email, otp) => {
 	}
 };
 
-/**
- * Resends a fresh verification OTP while enforcing a strict 60-second cooldown
- * to prevent email spamming on the external mailing service.
- *
- * @param {string} email - The unverified user's email address
- * @throws {AppError} If cooldown is active, user is missing, or user is already verified
- */
+// Sends a new sign-up code that replaces the old one.
+// Users must wait one minute between codes, so nobody can flood an inbox or overuse our email service.
 export const resendOTP = async (email) => {
 	const user = await User.findOne({ email }).select("+otpExpiresAt");
 
@@ -184,14 +161,8 @@ export const resendOTP = async (email) => {
 	await sendOTP(user.name, email, plainOTP);
 };
 
-/**
- * Issues a password reset OTP to a verified email-provider user.
- * Reuses the User document's `otp` / `otpExpiresAt` fields (idle once a user
- * is verified) instead of adding parallel reset-specific fields.
- *
- * @param {string} email - The user's email address
- * @throws {AppError} If the user is missing/unverified, signed in via OAuth, or the cooldown is active
- */
+// Only works for accounts that sign in with email and password.
+// The reset code is saved in the same place as the sign-up code, since that one is no longer needed after sign-up.
 export const forgotPassword = async (email) => {
 	const user = await User.findOne({ email, isVerified: true }).select(
 		"+otpExpiresAt",
@@ -223,21 +194,7 @@ export const forgotPassword = async (email) => {
 	await sendPasswordResetOTP(user.name, email, plainOTP);
 };
 
-/**
- * Verifies a password reset OTP and persists the new password.
- *
- * @NOTE: The Mongoose pre-save hook re-hashes the password;
- * the schema's `minlength: 8` enforces strength (the global
- * error handler maps the ValidationError to 422).
- *
- * @NOTE: All sessions are invalidated on success so an attacker who triggered
- * the reset is logged out everywhere alongside the legitimate user.
- *
- * @param {string} email - The user's email address
- * @param {string} otp - The raw 6-digit reset code
- * @param {string} newPassword - The user's chosen new password
- * @throws {AppError} If the user is missing/unverified, signed in via OAuth, or the OTP is invalid/expired
- */
+// Logs out every device, so whoever started the reset is kicked out too.
 export const resetPassword = async (email, otp, newPassword) => {
 	const user = await User.findOne({ email, isVerified: true }).select(
 		"+otp +otpExpiresAt",
@@ -282,17 +239,6 @@ export const resetPassword = async (email, otp, newPassword) => {
 	}
 };
 
-/**
- * Changes the authenticated user's password after verifying the current one,
- * then revokes every other active session (the current device stays signed in).
- *
- * @param {string} userId - Authenticated user's id (req.user._id).
- * @param {string} currentPassword - The raw current-password attempt.
- * @param {string} newPassword - The validated new password.
- * @param {string} currentSessionId - The current session's id (req.sessionId); preserved.
- * @returns {Promise<void>}
- * @throws {AppError} USER_NOT_FOUND | PROVIDER_MISMATCH | INVALID_CREDENTIALS | PASSWORD_REUSE.
- */
 export const changePassword = async (
 	userId,
 	currentPassword,
@@ -351,16 +297,6 @@ export const changePassword = async (
 	}
 };
 
-/**
- * Unlocks an account by verifying passwords and creating a secure session.
- * Tracks active devices to enforce concurrency limits.
- *
- * @param {string} email - The user's email
- * @param {string} password - The raw password attempt
- * @param {Object} deviceInfo - Rich parsed metrics about the requester's device
- * @returns {Promise<Object>} The generated session document
- * @throws {AppError} If credentials fail or the user is unverified
- */
 export const loginUser = async (email, password, deviceInfo) => {
 	const user = await User.findOne({ email }).select("+password");
 
@@ -423,18 +359,6 @@ export const loginUser = async (email, password, deviceInfo) => {
 	return session;
 };
 
-/**
- * Signs a user in with a Google ID token.
- * Verifies the token, enforces the `email_verified` claim, then delegates
- * to the shared OAuth helper for user lookup/creation and session issuance.
- *
- * @param {string} idToken - Google ID token supplied by the client.
- * @param {Object} deviceInfo - Parsed device metadata attached to the new session.
- * @returns {Promise<{ session: Object, isNewUser: boolean }>} The issued session and whether a new account was created.
- *
- * @throws {AppError} `INVALID_ID_TOKEN` — the token is invalid or malformed.
- * @throws {AppError} `GOOGLE_EMAIL_NOT_VERIFIED` — Google has not verified the email on the account.
- */
 export const loginOrCreateGoogleUser = async (idToken, deviceInfo) => {
 	const payload = await verifyGoogleIdToken(idToken);
 	const { name, email, picture, email_verified: emailVerified } = payload;
@@ -450,41 +374,17 @@ export const loginOrCreateGoogleUser = async (idToken, deviceInfo) => {
 	return loginOrCreateOAuthUser("google", { name, email, picture }, deviceInfo);
 };
 
-/**
- * Signs a user in with a GitHub OAuth authorization code.
- * Exchanges the code for a verified profile, then delegates to the shared
- * OAuth helper for user lookup/creation and session issuance.
- *
- * @param {string} code - GitHub authorization code supplied by the client.
- * @param {Object} deviceInfo - Parsed device metadata attached to the new session.
- * @returns {Promise<{ session: Object, isNewUser: boolean }>} The issued session and whether a new account was created.
-
- * @throws {AppError} `INVALID_GITHUB_CODE` — the code is invalid, expired, or the GitHub API call failed.
- * @throws {AppError} `GITHUB_EMAIL_NOT_VERIFIED` — the account has no verified primary email.
- */
 export const loginOrCreateGithubUser = async (code, deviceInfo) => {
 	const profile = await verifyGithubCodeAndFetchProfile(code);
 	return loginOrCreateOAuthUser("github", profile, deviceInfo);
 };
 
-/**
- * Destroys a single specific session to log a user out of their current device.
- *
- * @param {string} sessionId - The specific session to delete
- * @returns {Promise<void>}
- */
 export const logoutUser = async (sessionId) => {
 	if (sessionId) {
 		await Session.deleteOne({ _id: sessionId });
 	}
 };
 
-/**
- * Destroys all active sessions for a user, forcing a global logout across all devices.
- *
- * @param {string} userId - The unique identifier of the user
- * @returns {Promise<void>}
- */
 export const logoutAllUser = async (userId) => {
 	if (userId) {
 		await Session.deleteMany({ userId });

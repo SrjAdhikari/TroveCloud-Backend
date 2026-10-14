@@ -22,8 +22,8 @@ const { ORPHAN_RATIO_EXCEEDED } = appErrorCode;
 
 export const DEFAULT_MAX_ORPHAN_RATIO = 0.2;
 
-// The `ownedKeys` functions are per prefix because the ownership check is per collection.
-// A key that looks like a file but is actually a profile picture is not owned by any File row, and vice versa.
+// Files and profile pictures are saved in different collections, so each storage folder
+// is checked against its own collection.
 const ownedFileKeys = async (keys) => {
 	const rows = await File.find({ objectKey: { $in: keys } })
 		.select("objectKey")
@@ -40,7 +40,7 @@ const ownedProfilePictureKeys = async (keys) => {
 	return new Set(rows.map((row) => row.profilePictureKey));
 };
 
-// The pattern is per prefix because it also decides which collection owns the key.
+// Each folder has its own pattern because the pattern also tells which collection owns the file.
 const SCAN_TARGETS = [
 	{
 		prefix: FILE_PREFIX,
@@ -54,7 +54,7 @@ const SCAN_TARGETS = [
 	},
 ];
 
-// Exported so a caller reporting what was covered cannot hold a stale copy.
+// Built from SCAN_TARGETS and exported, so anything reporting which folders were scanned can't get out of date.
 export const SCANNED_PREFIXES = SCAN_TARGETS.map((target) => target.prefix);
 
 export const scanForOrphans = async () => {
