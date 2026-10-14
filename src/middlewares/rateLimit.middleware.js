@@ -10,25 +10,15 @@ import { FIFTEEN_MINUTES_MS } from "../utils/date.js";
 const { TOO_MANY_REQUESTS } = httpStatus;
 const { RATE_LIMITED } = appErrorCode;
 
-/**
- * Resolves the key each limiter counts against — the REAL end user, not the
- * Cloudflare edge IP that Express sees as `req.ip` once requests pass through
- * the proxy. Getting this wrong collapses every user into a handful of buckets.
- *
- * @param {import("express").Request} req
- * @returns {string} the identifier the limiter buckets on
- */
+// Counts requests per real user (or real visitor IP), not the Cloudflare IP Express sees.
+// Otherwise many users would share the same limit.
 export const clientKey = (req) => {
 	if (req.user?._id) return req.user._id.toString();
 	const ip = req.headers["cf-connecting-ip"] ?? req.ip;
 	return ipKeyGenerator(ip, 56);
 };
 
-/**
- * Converts express-rate-limit's 429 into the project error envelope by routing
- * an AppError through the global error handler — instead of the library's
- * default plaintext "Too many requests" body, which breaks the response contract.
- */
+// Sends the rate-limit error in the normal app error format instead of plain text.
 export const rateLimitExceededHandler = (req, res, next) =>
 	next(
 		new AppError(
@@ -38,9 +28,7 @@ export const rateLimitExceededHandler = (req, res, next) =>
 		),
 	);
 
-/**
- * Starter windows + per-key request caps per tier.
- */
+// Starting time windows and request limits for each group of routes.
 const RATE_LIMITS = {
 	global: { windowMs: FIFTEEN_MINUTES_MS, limit: 1000 },
 	auth: { windowMs: FIFTEEN_MINUTES_MS, limit: 10 },

@@ -11,13 +11,7 @@ const { BAD_REQUEST, UNPROCESSABLE_ENTITY, CONFLICT, INTERNAL_SERVER_ERROR } =
 const { INVALID_ID, VALIDATION_ERROR, DUPLICATE_FIELD, INTERNAL_ERROR } =
 	appErrorCode;
 
-/**
- * Converts a known Mongoose/MongoDB error into a structured AppError.
- * Returns null when the error isn't one we explicitly recognize.
- *
- * @param {Error} err - The thrown or rejected error.
- * @returns {AppError|null}
- */
+// Returns null if the error isn't one we recognize.
 const knownAppError = (err) => {
 	// 1. Mongoose invalid ObjectId / cast error
 	if (err.name === "CastError") {
@@ -54,17 +48,7 @@ const knownAppError = (err) => {
 	return null;
 };
 
-/**
- * Global error handling middleware for Express 5.
- *
- * Converts known errors into structured AppError responses.
- * Must be registered after all routes and other middleware in the Express app.
- *
- * @param {Error} err - The thrown or rejected error.
- * @param {import('express').Request} req - Express request object.
- * @param {import('express').Response} res - Express response object.
- * @param {import('express').NextFunction} next - Express next function.
- */
+// Must be added after all routes and other middleware.
 const globalErrorHandler = (err, req, res, next) => {
 	// Ignore errors that have already been handled by previous middleware (e.g., if headers have been sent).
 	if (res.headersSent) {

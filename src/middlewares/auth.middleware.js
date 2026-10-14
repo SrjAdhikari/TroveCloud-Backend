@@ -9,15 +9,6 @@ import { clearAuthCookie } from "../utils/cookies.js";
 const { UNAUTHORIZED, FORBIDDEN } = httpStatus;
 const { UNAUTHORIZED_ACCESS, ACCOUNT_SUSPENDED } = appErrorCode;
 
-/**
- * Global authentication middleware to protect secured routes.
- *
- * @param {import("express").Request} req - Express request object.
- * @param {import("express").Response} res - Express response object.
- * @param {import("express").NextFunction} next - Express next middleware function.
- * @throws {AppError} - If the session token is missing, naturally expired,
- * the user was deleted/soft-deleted, or the account is suspended.
- */
 const authenticate = async (req, res, next) => {
 	const sessionId = req.signedCookies.token;
 

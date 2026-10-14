@@ -12,16 +12,8 @@ const { EMAIL_SEND_FAILED } = appErrorCode;
 
 const resend = new Resend(RESEND_API_KEY);
 
-/**
- * Centralized utility for dispatching HTML emails using the Resend API.
- * Wraps external network calls in a try-catch to prevent unhandled node server crashes
- * if the Resend API undergoes downtime or DNS resolution fails.
- *
- * @param {string} to - The recipient's email address
- * @param {string} subject - The subject line of the email
- * @param {string} html - The compiled HTML payload to send
- * @throws {AppError} If the HTTP request fails or Resend rejects the payload
- */
+// Sends an HTML email through Resend.
+// If sending fails, it logs the problem and throws a normal app error, so an email outage cannot crash the server.
 const sendEmail = async (to, subject, html) => {
 	try {
 		const { error } = await resend.emails.send({

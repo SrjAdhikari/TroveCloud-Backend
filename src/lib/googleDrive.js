@@ -20,11 +20,8 @@ const DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_FETCH_TIMEOUT_MS = 15000;
 const DRIVE_USER_AGENT = "TroveCloud";
 
-/**
- * Mime-type lookup for Google-native files that need conversion on import.
- * Unmapped google-apps types (Forms, Drawings, Jamboards, Sites, Shortcuts)
- * are rejected as UNSUPPORTED_DRIVE_TYPE by the service layer.
- */
+// Maps Google Docs, Sheets and Slides to the Office format they are converted to on import.
+// Other Google-only types (Forms, Drawings, Sites, Shortcuts...) are not listed and get rejected.
 export const GOOGLE_APPS_EXPORT_MAP = Object.freeze({
 	"application/vnd.google-apps.document": {
 		mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -51,10 +48,7 @@ const buildStreamHeaders = (accessToken) => ({
 	"User-Agent": DRIVE_USER_AGENT,
 });
 
-/**
- * Extracts Google's machine-readable error reason from a non-2xx Drive response.
- * Safe to call even if the body is not JSON — returns "" on parse failure.
- */
+// Returns an empty string if the error reply can't be read.
 const parseDriveErrorReason = async (response) => {
 	try {
 		const body = await response.json();
@@ -64,10 +58,7 @@ const parseDriveErrorReason = async (response) => {
 	}
 };
 
-/**
- * Maps an unsuccessful Drive HTTP response to an AppError.
- * Called only after a `response.ok === false` check. Never echoes the access token.
- */
+// Never puts the access token in the error.
 const mapDriveResponseError = async (response) => {
 	if (response.status === 401) {
 		return new AppError(
@@ -99,11 +90,8 @@ const mapDriveResponseError = async (response) => {
 	return new AppError("Drive request failed", BAD_REQUEST, DRIVE_IMPORT_FAILED);
 };
 
-/**
- * Unified catch for Drive calls. Re-throws AppError as-is; wraps anything else
- * (network errors, JSON parse errors, aborts) as DRIVE_IMPORT_FAILED.
- * Dev-mode logging is redacted — access tokens never hit stdout.
- */
+// Turns any failure that isn't already an app error into a generic import error.
+// Access tokens are never logged.
 const handleDriveFetchError = (error, operation) => {
 	if (error instanceof AppError) throw error;
 
@@ -117,17 +105,7 @@ const handleDriveFetchError = (error, operation) => {
 	throw new AppError("Drive request failed", BAD_REQUEST, DRIVE_IMPORT_FAILED);
 };
 
-/**
- * Fetches authoritative metadata for a single Drive file or folder.
- * Client-supplied mimeType from the Picker is not trusted;
- * callers should re-fetch via this function before branching on type.
- *
- * @param {string} accessToken - Short-lived OAuth token (drive.readonly scope).
- * @param {string} fileId - Drive file or folder ID.
- *
- * @returns {Promise<{id:string, name:string, mimeType:string, size?:string, trashed?:boolean, shortcutDetails?:Object, parents?:string[]}>}
- * @throws {AppError} INVALID_DRIVE_TOKEN / DRIVE_ITEM_NOT_FOUND / DRIVE_IMPORT_FAILED
- */
+// Call this before deciding how to handle a file, because the file type sent by the Picker isn't trusted.
 export const getDriveFileMetadata = async (accessToken, fileId) => {
 	try {
 		const url = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
@@ -153,14 +131,7 @@ export const getDriveFileMetadata = async (accessToken, fileId) => {
 	}
 };
 
-/**
- * Initiates a binary download of a regular (non-Google-native) Drive file.
- * Returns the raw fetch Response so the caller can stream `response.body` as a Web ReadableStream.
- *
- * @param {string} accessToken
- * @param {string} fileId
- * @returns {Promise<Response>}
- */
+// Returns the raw response so the caller can stream the file.
 export const downloadDriveFile = async (accessToken, fileId) => {
 	try {
 		const url = new URL(`${DRIVE_FILES_URL}/${encodeURIComponent(fileId)}`);
@@ -183,17 +154,8 @@ export const downloadDriveFile = async (accessToken, fileId) => {
 	}
 };
 
-/**
- * Exports a Google-native file (Doc/Sheet/Slides) to an Office format.
- * Returns the raw fetch Response so the caller can stream `response.body`.
- *
- * @param {string} accessToken
- * @param {string} fileId
- * @param {string} exportMimeType - One of the target mimes in GOOGLE_APPS_EXPORT_MAP.
- *
- * @returns {Promise<Response>}
- * @throws {AppError} DRIVE_EXPORT_TOO_LARGE for >= 10 MB Docs/Slides.
- */
+// Converts a Google Doc, Sheet or Slides file to an Office file. Returns the raw response so the caller can stream it.
+// Google refuses to convert Docs and Slides of 10 MB or more, so those fail.
 export const exportGoogleDoc = async (accessToken, fileId, exportMimeType) => {
 	try {
 		const url = new URL(
@@ -217,17 +179,8 @@ export const exportGoogleDoc = async (accessToken, fileId, exportMimeType) => {
 	}
 };
 
-/**
- * Lists one page of children inside a Drive folder.
- * Server-side filter excludes trashed items.
- * Callers handle pagination by re-calling with `nextPageToken` until it's undefined.
- *
- * @param {string} accessToken
- * @param {string} folderId
- * @param {string} [pageToken]
- *
- * @returns {Promise<{files: Array<{id:string,name:string,mimeType:string,size?:string}>, nextPageToken?:string}>}
- */
+// Gets one page of the items in a folder, skipping trashed ones.
+// To get more, call again with the returned nextPageToken until none comes back.
 export const listDriveFolderChildren = async (accessToken, folderId, pageToken) => {
 	try {
 		const url = new URL(DRIVE_FILES_URL);
