@@ -6,7 +6,6 @@ import envConfig from "../constants/env.js";
 
 const { MONGODB_URI } = envConfig;
 
-// Connect to MongoDB database
 const connectToMongoDB = async () => {
 	try {
 		console.log("🔄️ Connecting to MongoDB...");
@@ -17,8 +16,8 @@ const connectToMongoDB = async () => {
 	}
 };
 
-// Graceful shutdown: exit code is 128 plus the stop signal's number (130 for
-// Ctrl+C, 143 for a shutdown request), so a stopped run never looks successful
+// Exit code is 128 plus the signal number (130 for Ctrl+C, 143 for a shutdown request),
+// so a stopped run never looks like it finished successfully.
 export const gracefulShutdown = async (signal) => {
 	await mongoose.disconnect();
 	console.log("👋️ MongoDB connection closed");

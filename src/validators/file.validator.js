@@ -11,8 +11,8 @@ const { MAX_FILE_UPLOAD_SIZE } = envConfig;
 const MAX_NAME_LENGTH = 255;
 const MIN_NAME_LENGTH = 3;
 
-// Strip any HTML, then reduce to a base name (defuses traversal),
-// strip control characters and backslashes, trim and bound length.
+// Removes HTML and any folder path (so names like "../x" can't reach other folders),
+// then removes line breaks, tabs and backslashes, trims and cuts to the max length.
 export const sanitizeFileName = (value) =>
 	path
 		.basename(sanitizeInput(value))

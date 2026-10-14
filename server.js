@@ -6,10 +6,6 @@ import connectToMongoDB from "./src/database/mongoDB.js";
 
 const { PORT, NODE_ENV } = envConfig;
 
-/**
- * Starts the Express server and connects to MongoDB
- * @throws {Error} if connection to MongoDB fails
- */
 const startServer = async () => {
 	try {
 		await connectToMongoDB();

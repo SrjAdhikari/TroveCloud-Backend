@@ -1,10 +1,7 @@
 //* src/utils/fileCategories.js
 
-/**
- * Maps a file extension to a coarse storage category and exposes the Lucide
- * icon each category renders with on the frontend. Used by the storage-usage
- * breakdown. Extensions are matched lowercase, with or without a leading dot.
- */
+// Groups file extensions into storage categories, with the icon the frontend shows
+// for each. Used for the storage breakdown.
 
 export const CATEGORY_ICONS = Object.freeze({
 	Documents: "file-text",
