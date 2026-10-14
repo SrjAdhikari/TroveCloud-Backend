@@ -9,18 +9,8 @@ import {
 } from "./_components.js";
 import sanitizeInput from "../../utils/sanitizeInput.js";
 
-/**
- * Security alert sent when a new device / browser signs into the TroveCloud account.
- * This helps users spot unauthorized access.
- *
- * @param {string} userName - Recipient's display name
- * @param {Object} params
- * @param {{ browser: string, deviceOS: string, deviceType: string, ipAddress: string }} params.deviceInfo
- *   Parsed device metadata from the new session (same shape as the
- *   Session model stores)
- * @param {Date} params.signedInAt - When the session was created
- * @returns {string} Complete HTML email body
- */
+// Email telling the user a new device or browser signed in, so they can spot access that wasn't them.
+// Device details are cleaned of HTML before they go into the email.
 export const NEW_DEVICE_ALERT_EMAIL_TEMPLATE = (
 	userName,
 	{ deviceInfo, signedInAt },

@@ -1,10 +1,7 @@
 //* src/templates/emails/_base.js
 
-/**
- * Shared brand tokens for all TroveCloud transactional emails.
- * Kept intentionally spare — clean typography, neutral palette, one
- * warm accent color reserved for security callouts.
- */
+// Colors and logo shared by all TroveCloud emails.
+// The amber alert colors are only for security notices.
 export const brand = Object.freeze({
 	name: "TroveCloud",
 	primaryColor: "#7C3AED",
@@ -19,17 +16,8 @@ export const brand = Object.freeze({
 	alertText: "#7c2d12",
 });
 
-/**
- * Wraps body HTML in the shared email layout: brand header, content
- * card, legal footer. Uses table-based layout and inline styles for
- * maximum cross-client compatibility (Gmail, Outlook, Apple Mail).
- *
- * @param {{ preheader?: string, title?: string, bodyHtml: string }} params
- * @param {string} [params.preheader] - Short inbox-preview text (hidden in the message body)
- * @param {string} [params.title] - HTML `<title>` element; some clients show it
- * @param {string} params.bodyHtml - Pre-rendered HTML for the content card
- * @returns {string} Complete HTML document ready for dispatch
- */
+// Wraps an email body in the shared layout: header, content box and footer.
+// Uses tables and inline styles so it displays correctly in Gmail, Outlook and Apple Mail.
 export const layoutEmail = ({
 	preheader = "",
 	title = "",

@@ -70,13 +70,6 @@ const EXTENSION_CATEGORY = Object.freeze({
 	xz: "Archives",
 });
 
-/**
- * Resolves a file extension to its storage category.
- *
- * @param {string} [extension] - Extension as stored on the file (e.g. ".jpg"),
- *   case-insensitive; a missing leading dot or empty/undefined value is tolerated.
- * @returns {string} One of the keys in `CATEGORY_ICONS`; "Other" when unknown.
- */
 export const categorizeExtension = (extension) => {
 	const normalized = (extension ?? "").replace(/^\./, "").toLowerCase();
 	return EXTENSION_CATEGORY[normalized] ?? "Other";

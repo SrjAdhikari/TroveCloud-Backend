@@ -2,14 +2,7 @@
 
 import { UAParser } from "ua-parser-js";
 
-/**
- * Build the device metadata payload stored on each Session document.
- *
- * @param {import("express").Request} req - Incoming request whose headers and
- *   socket describe the originating device
- * @returns {{ userAgent: string, ipAddress: string, deviceType: string,
- *   browser: string, deviceOS: string }} Shape expected by the Session model
- */
+// Builds the device details (browser, system, IP address) saved with each session.
 const buildDeviceInfo = (req) => {
 	const userAgent = req.headers["user-agent"] || "";
 	const ipAddress =

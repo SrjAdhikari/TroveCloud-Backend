@@ -1,11 +1,5 @@
 //* src/constants/appErrorCode.js
 
-/**
- * Centralized application error codes.
- *
- * @readonly
- * @enum {string}
- */
 const appErrorCode = Object.freeze({
 	// Authentication
 	UNAUTHORIZED_ACCESS: "UNAUTHORIZED_ACCESS",

@@ -3,14 +3,6 @@
 import { layoutEmail } from "./_base.js";
 import { codeBox, infoCallout, paragraph } from "./_components.js";
 
-/**
- * Password reset OTP email. Fires during the forgot-password flow
- * when the user requests a one-time code to set a new password.
- *
- * @param {string} userName - Recipient's display name
- * @param {string} otp - 6-digit reset code (plain text, not hashed)
- * @returns {string} Complete HTML email body
- */
 export const PASSWORD_RESET_EMAIL_TEMPLATE = (userName, otp) =>
 	layoutEmail({
 		preheader: `Your TroveCloud password reset code is ${otp}`,

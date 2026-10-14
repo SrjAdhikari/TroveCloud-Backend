@@ -1,11 +1,6 @@
 //* src/constants/httpStatus.js
 
-/**
- * Minimal HTTP status codes used by the application.
- *
- * @readonly
- * @enum {number}
- */
+// Only the HTTP status codes this app uses, not the full list.
 const httpStatus = Object.freeze({
 	OK: 200,
 	CREATED: 201,
