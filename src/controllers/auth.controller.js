@@ -23,7 +23,7 @@ import buildDeviceInfo from "../utils/deviceInfo.js";
 
 const { CREATED, OK } = httpStatus;
 
-const registerHandler = async (req, res) => {
+export const registerHandler = async (req, res) => {
 	const { name, email, password } = req.body;
 
 	await createUser(name, email, password);
@@ -34,7 +34,7 @@ const registerHandler = async (req, res) => {
 	});
 };
 
-const verifyOTPHandler = async (req, res) => {
+export const verifyOTPHandler = async (req, res) => {
 	const { email, otp } = req.body;
 
 	await verifyOTP(email, otp);
@@ -45,7 +45,7 @@ const verifyOTPHandler = async (req, res) => {
 	});
 };
 
-const resendOTPHandler = async (req, res) => {
+export const resendOTPHandler = async (req, res) => {
 	const { email } = req.body;
 
 	await resendOTP(email);
@@ -56,7 +56,7 @@ const resendOTPHandler = async (req, res) => {
 	});
 };
 
-const forgotPasswordHandler = async (req, res) => {
+export const forgotPasswordHandler = async (req, res) => {
 	const { email } = req.body;
 
 	await forgotPassword(email);
@@ -67,7 +67,7 @@ const forgotPasswordHandler = async (req, res) => {
 	});
 };
 
-const resetPasswordHandler = async (req, res) => {
+export const resetPasswordHandler = async (req, res) => {
 	const { email, otp, newPassword } = req.body;
 
 	await resetPassword(email, otp, newPassword);
@@ -78,7 +78,7 @@ const resetPasswordHandler = async (req, res) => {
 	});
 };
 
-const loginHandler = async (req, res) => {
+export const loginHandler = async (req, res) => {
 	const { email, password } = req.body;
 
 	const deviceInfo = buildDeviceInfo(req);
@@ -92,7 +92,7 @@ const loginHandler = async (req, res) => {
 	});
 };
 
-const logoutHandler = async (req, res) => {
+export const logoutHandler = async (req, res) => {
 	const sessionId = req.signedCookies.token;
 
 	await logoutUser(sessionId);
@@ -101,7 +101,7 @@ const logoutHandler = async (req, res) => {
 	res.status(OK).json({ success: true, message: "Logged out successfully" });
 };
 
-const logoutAllHandler = async (req, res) => {
+export const logoutAllHandler = async (req, res) => {
 	const userId = req.user._id;
 
 	await logoutAllUser(userId);
@@ -112,7 +112,7 @@ const logoutAllHandler = async (req, res) => {
 		.json({ success: true, message: "Logged out of all devices successfully" });
 };
 
-const googleOAuthHandler = async (req, res) => {
+export const googleOAuthHandler = async (req, res) => {
 	const { idToken } = req.body;
 
 	const deviceInfo = buildDeviceInfo(req);
@@ -131,7 +131,7 @@ const googleOAuthHandler = async (req, res) => {
 	});
 };
 
-const githubOAuthHandler = async (req, res) => {
+export const githubOAuthHandler = async (req, res) => {
 	const { code } = req.body;
 
 	const deviceInfo = buildDeviceInfo(req);
@@ -150,7 +150,7 @@ const githubOAuthHandler = async (req, res) => {
 	});
 };
 
-const getCurrentUserHandler = async (req, res) => {
+export const getCurrentUserHandler = async (req, res) => {
 	const user = req.user.toObject?.() ?? req.user;
 
 	res.status(OK).json({
@@ -160,7 +160,7 @@ const getCurrentUserHandler = async (req, res) => {
 	});
 };
 
-const changePasswordHandler = async (req, res) => {
+export const changePasswordHandler = async (req, res) => {
 	const { currentPassword, newPassword } = req.body;
 	const userId = req.user._id;
 	const sessionId = req.sessionId;
@@ -171,19 +171,4 @@ const changePasswordHandler = async (req, res) => {
 		success: true,
 		message: "Password changed successfully",
 	});
-};
-
-export {
-	registerHandler,
-	verifyOTPHandler,
-	resendOTPHandler,
-	forgotPasswordHandler,
-	resetPasswordHandler,
-	loginHandler,
-	logoutHandler,
-	logoutAllHandler,
-	googleOAuthHandler,
-	githubOAuthHandler,
-	getCurrentUserHandler,
-	changePasswordHandler,
 };

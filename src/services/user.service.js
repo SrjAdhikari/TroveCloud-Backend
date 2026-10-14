@@ -137,7 +137,7 @@ const readProfilePictureBody = async (body, declaredLength) => {
  * @returns {Promise<Object>} The updated lean user, minus password/otp/otpExpiresAt.
  * @throws {AppError} `USER_NOT_FOUND` if the user no longer exists (rare TOCTOU race).
  */
-const updateProfile = async (userId, name) => {
+export const updateProfile = async (userId, name) => {
 	const user = await User.findByIdAndUpdate(
 		userId,
 		{ name },
@@ -163,7 +163,7 @@ const updateProfile = async (userId, name) => {
  * @returns {Promise<Object>} Updated lean user, minus password/otp/otpExpiresAt.
  * @throws {AppError} INVALID_IMAGE_TYPE | IMAGE_TOO_LARGE | INVALID_INPUT | UPLOAD_INCOMPLETE | USER_NOT_FOUND
  */
-const uploadProfilePicture = async (userId, body, headers = {}) => {
+export const uploadProfilePicture = async (userId, body, headers = {}) => {
 	const { declaredType, declaredLength } =
 		validateProfilePictureHeaders(headers);
 
@@ -220,7 +220,7 @@ const uploadProfilePicture = async (userId, body, headers = {}) => {
  * @param {{profilePictureKey?: string, profilePicture?: string}|null} user
  * @returns {Promise<string|null>}
  */
-const resolveProfilePictureUrl = async (user) => {
+export const resolveProfilePictureUrl = async (user) => {
 	const { profilePictureKey, profilePicture } = user ?? {};
 
 	if (profilePictureKey) {
@@ -248,18 +248,11 @@ const resolveProfilePictureUrl = async (user) => {
  * @param {Object|null} user - A lean user document.
  * @returns {Promise<Object|null>}
  */
-const formatUser = async (user) => {
+export const formatUser = async (user) => {
 	if (!user) return user;
 
 	const { profilePictureKey, ...safeUser } = user;
 	const profilePictureUrl = await resolveProfilePictureUrl(user);
 
 	return { ...safeUser, profilePictureUrl };
-};
-
-export {
-	updateProfile,
-	uploadProfilePicture,
-	resolveProfilePictureUrl,
-	formatUser,
 };

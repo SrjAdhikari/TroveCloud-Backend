@@ -107,7 +107,7 @@ const createUploadClaim = async (
  * @returns {Promise<Object>} The newly created file document (lean)
  * @throws {AppError} Unknown parent, bad extension, quota exceeded, or upload failure
  */
-const uploadFileFromServer = async (
+export const uploadFileFromServer = async (
 	parentDirId,
 	userId,
 	fileName,
@@ -209,5 +209,3 @@ const uploadFileFromServer = async (
 
 	return file;
 };
-
-export { uploadFileFromServer };

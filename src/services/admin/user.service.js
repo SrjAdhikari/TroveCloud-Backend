@@ -134,7 +134,7 @@ const findUserById = async (id) => {
  * @param {string} [options.status] - One of `active | suspended | deleted`.
  * @param {boolean} [options.includeDeleted] - Include soft-deleted users when no status filter is set.
  */
-const listUsers = async ({ page, limit, q, role, status, includeDeleted }) => {
+export const listUsers = async ({ page, limit, q, role, status, includeDeleted }) => {
 	if (role && !ALLOWED_ROLES.includes(role)) {
 		throw new AppError(
 			`Invalid role filter. Allowed: ${ALLOWED_ROLES.join(", ")}`,
@@ -185,7 +185,7 @@ const listUsers = async ({ page, limit, q, role, status, includeDeleted }) => {
  *
  * @param {string} id - User _id (ObjectId string).
  */
-const getUserById = async (id) => {
+export const getUserById = async (id) => {
 	const user = await User.findById(id).lean();
 	if (!user) {
 		throw new AppError("User not found", NOT_FOUND, USER_NOT_FOUND);
@@ -242,7 +242,7 @@ const getUserById = async (id) => {
  *
  * @returns {Promise<object>} - Object containing the updated user
  */
-const changeUserRole = async (caller, targetId, newRole) => {
+export const changeUserRole = async (caller, targetId, newRole) => {
 	if (!ALLOWED_ROLES.includes(newRole)) {
 		throw new AppError(
 			`Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}`,
@@ -278,7 +278,7 @@ const changeUserRole = async (caller, targetId, newRole) => {
  * @param {object} caller - User object
  * @param {string} targetId - ID of the user to suspend
  */
-const suspendUser = async (caller, targetId) => {
+export const suspendUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
 	const user = await findUserById(targetId);
@@ -323,7 +323,7 @@ const suspendUser = async (caller, targetId) => {
  *
  * @returns {Promise<object>} - Object containing the unsuspended user
  */
-const unsuspendUser = async (caller, targetId) => {
+export const unsuspendUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 	if (user.deletedAt) {
 		throw new AppError(
@@ -354,7 +354,7 @@ const unsuspendUser = async (caller, targetId) => {
  *
  * @returns {Promise<object>} - Object containing the number of sessions revoked
  */
-const forceLogoutUser = async (caller, targetId) => {
+export const forceLogoutUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 
 	// Self force-logout is harmless — admins can punt their own sessions.
@@ -385,7 +385,7 @@ const forceLogoutUser = async (caller, targetId) => {
  *
  * @returns {Promise<object>} - Object containing the soft-deleted user
  */
-const softDeleteUser = async (caller, targetId) => {
+export const softDeleteUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
 	const user = await findUserById(targetId);
@@ -422,7 +422,7 @@ const softDeleteUser = async (caller, targetId) => {
  *
  * @returns {Promise<object>} - Object containing the number of files and directories deleted
  */
-const hardDeleteUser = async (caller, targetId) => {
+export const hardDeleteUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
 	const user = await findUserById(targetId);
@@ -514,7 +514,7 @@ const hardDeleteUser = async (caller, targetId) => {
  *
  * @returns {Promise<object>} - Object containing the restored user
  */
-const restoreUser = async (caller, targetId) => {
+export const restoreUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 
 	if (!user.deletedAt) {
@@ -527,16 +527,4 @@ const restoreUser = async (caller, targetId) => {
 	await user.save();
 
 	return toPlainUser(user);
-};
-
-export {
-	listUsers,
-	getUserById,
-	changeUserRole,
-	suspendUser,
-	unsuspendUser,
-	forceLogoutUser,
-	softDeleteUser,
-	hardDeleteUser,
-	restoreUser,
 };

@@ -9,7 +9,7 @@ import {
 
 const { OK } = httpStatus;
 
-const updateProfileHandler = async (req, res) => {
+export const updateProfileHandler = async (req, res) => {
 	const { name } = req.body;
 	const userId = req.user._id;
 
@@ -22,7 +22,7 @@ const updateProfileHandler = async (req, res) => {
 	});
 };
 
-const uploadProfilePictureHandler = async (req, res) => {
+export const uploadProfilePictureHandler = async (req, res) => {
 	const userId = req.user._id;
 	const updatedUser = await uploadProfilePicture(userId, req, {
 		contentType: req.headers["content-type"],
@@ -35,5 +35,3 @@ const uploadProfilePictureHandler = async (req, res) => {
 		data: await formatUser(updatedUser),
 	});
 };
-
-export { updateProfileHandler, uploadProfilePictureHandler };

@@ -9,7 +9,7 @@ import { updateAncestorDirectoryStats } from "../directory.service.js";
 
 import { getObjectMetadata } from "../../lib/r2.js";
 
-const MAX_EXPIRED_FILES_PER_SWEEP = 25;
+export const MAX_EXPIRED_FILES_PER_SWEEP = 25;
 
 const findExpiredFiles = async (userId, excludedFileId) => {
 	const filter = {
@@ -128,7 +128,7 @@ const releaseExpiredFiles = async (userId, excludedFileId) => {
 };
 
 /** Settles a user's expired reservations and removes the objects of the refunded rows */
-const settleExpiredPendingFiles = async (userId, excludedFileId) => {
+export const settleExpiredPendingFiles = async (userId, excludedFileId) => {
 	const deletedFiles = await releaseExpiredFiles(userId, excludedFileId);
 
 	await Promise.allSettled(
@@ -136,9 +136,4 @@ const settleExpiredPendingFiles = async (userId, excludedFileId) => {
 	);
 
 	return deletedFiles;
-};
-
-export {
-	MAX_EXPIRED_FILES_PER_SWEEP,
-	settleExpiredPendingFiles,
 };

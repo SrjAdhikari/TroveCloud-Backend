@@ -20,7 +20,7 @@ const { VALIDATION_ERROR, INVALID_ID } = appErrorCode;
  * @param {import("zod").ZodType} schema - Zod schema to validate the body with.
  * @returns {import("express").RequestHandler}
  */
-const validateBody = (schema) => (req, res, next) => {
+export const validateBody = (schema) => (req, res, next) => {
 	const result = schema.safeParse(req.body ?? {});
 
 	if (!result.success) {
@@ -44,12 +44,10 @@ const validateBody = (schema) => (req, res, next) => {
  * @param {string} id - The ID to validate.
  * @throws {AppError} - If the value is not a valid ObjectId.
  */
-const validateId = (req, res, next, id) => {
+export const validateId = (req, res, next, id) => {
 	if (!isValidObjectId(id)) {
 		throw new AppError("Invalid ID format", BAD_REQUEST, INVALID_ID);
 	}
 
 	next();
 };
-
-export { validateBody, validateId };

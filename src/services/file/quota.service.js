@@ -11,10 +11,10 @@ import AppError from "../../errors/AppError.js";
 const { BAD_REQUEST, INTERNAL_SERVER_ERROR } = httpStatus;
 const { STORAGE_LIMIT_EXCEEDED, INVALID_STORAGE_LIMIT } = appErrorCode;
 
-const isValidStorageLimit = (limit) => Number.isFinite(limit) && limit >= 0;
+export const isValidStorageLimit = (limit) => Number.isFinite(limit) && limit >= 0;
 
 /** Reads a user's stored bytes from the root directory's denormalized size */
-const getStoredBytes = async (userId, session) => {
+export const getStoredBytes = async (userId, session) => {
 	const rootDir = await Directory.findOne(
 		{ userId, parentDirId: null },
 		"size",
@@ -24,7 +24,7 @@ const getStoredBytes = async (userId, session) => {
 	return rootDir?.size ?? 0;
 };
 
-const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
+export const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
 	if (!isValidStorageLimit(totalStorageLimit)) {
 		throw new AppError(
 			"Storage limit is not configured",
@@ -47,7 +47,7 @@ const checkQuota = async (userId, bytes, totalStorageLimit, session) => {
  * If that frees up enough space, it is retried once. A second failure propagates unchanged.
  * With `reclaim` off, a quota rejection propagates without the sweep.
  */
-const reserveQuotaWithReclaim = async (
+export const reserveQuotaWithReclaim = async (
 	userId,
 	reserve,
 	{ excludedFileId, reclaim = true } = {},
@@ -69,11 +69,4 @@ const reserveQuotaWithReclaim = async (
 		// Exactly one retry: a second rejection propagates unchanged.
 		await reserve();
 	}
-};
-
-export {
-	isValidStorageLimit,
-	getStoredBytes,
-	checkQuota,
-	reserveQuotaWithReclaim,
 };

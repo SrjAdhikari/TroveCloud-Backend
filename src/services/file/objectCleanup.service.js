@@ -18,7 +18,7 @@ const isValidKey = (key) =>
  *
  * @param {{ key: string, label: string }[]} items
  */
-const removeObjects = async (items) => {
+export const removeObjects = async (items) => {
 	const labelByKey = new Map();
 
 	for (const { key, label } of items) {
@@ -51,5 +51,3 @@ const removeObjects = async (items) => {
 		}
 	}
 };
-
-export { removeObjects };

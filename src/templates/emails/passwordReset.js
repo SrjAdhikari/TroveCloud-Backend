@@ -11,7 +11,7 @@ import { codeBox, infoCallout, paragraph } from "./_components.js";
  * @param {string} otp - 6-digit reset code (plain text, not hashed)
  * @returns {string} Complete HTML email body
  */
-const PASSWORD_RESET_EMAIL_TEMPLATE = (userName, otp) =>
+export const PASSWORD_RESET_EMAIL_TEMPLATE = (userName, otp) =>
 	layoutEmail({
 		preheader: `Your TroveCloud password reset code is ${otp}`,
 		title: "Reset your password",
@@ -23,5 +23,3 @@ const PASSWORD_RESET_EMAIL_TEMPLATE = (userName, otp) =>
 			${infoCallout("This code expires in 10 minutes. If you did not request a password reset, you can safely ignore this email — your password will remain unchanged.")}
 		`,
 	});
-
-export { PASSWORD_RESET_EMAIL_TEMPLATE };

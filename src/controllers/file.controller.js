@@ -16,7 +16,7 @@ import httpStatus from "../constants/httpStatus.js";
 
 const { OK, CREATED } = httpStatus;
 
-const getFileHandler = async (req, res) => {
+export const getFileHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -29,7 +29,7 @@ const getFileHandler = async (req, res) => {
 	});
 };
 
-const createDownloadUrlHandler = async (req, res) => {
+export const createDownloadUrlHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -44,7 +44,7 @@ const createDownloadUrlHandler = async (req, res) => {
 	});
 };
 
-const initiateUploadHandler = async (req, res) => {
+export const initiateUploadHandler = async (req, res) => {
 	const user = req.user;
 
 	// Body validated and name sanitized by initiateUploadSchema (validateBody).
@@ -68,7 +68,7 @@ const initiateUploadHandler = async (req, res) => {
 	});
 };
 
-const confirmUploadHandler = async (req, res) => {
+export const confirmUploadHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -81,7 +81,7 @@ const confirmUploadHandler = async (req, res) => {
 	});
 };
 
-const cancelUploadHandler = async (req, res) => {
+export const cancelUploadHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -94,7 +94,7 @@ const cancelUploadHandler = async (req, res) => {
 	});
 };
 
-const updateFileHandler = async (req, res) => {
+export const updateFileHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -109,7 +109,7 @@ const updateFileHandler = async (req, res) => {
 	});
 };
 
-const deleteFileHandler = async (req, res) => {
+export const deleteFileHandler = async (req, res) => {
 	const user = req.user;
 	const fileId = req.params.id;
 
@@ -120,14 +120,4 @@ const deleteFileHandler = async (req, res) => {
 		message: "File deleted successfully",
 		data: deletedFile,
 	});
-};
-
-export {
-	getFileHandler,
-	createDownloadUrlHandler,
-	initiateUploadHandler,
-	confirmUploadHandler,
-	cancelUploadHandler,
-	updateFileHandler,
-	deleteFileHandler,
 };

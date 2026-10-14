@@ -8,7 +8,7 @@
  * @param {{_id, name}} [current] - the current directory, appended as the last crumb
  * @returns {Array<{_id, name}>}
  */
-const generateBreadCrumb = (ancestors = [], current) =>
+export const generateBreadCrumb = (ancestors = [], current) =>
 	current
 		? [...ancestors, { _id: current._id, name: current.name }]
 		: [...ancestors];
@@ -20,7 +20,5 @@ const generateBreadCrumb = (ancestors = [], current) =>
  * @param {Array<{name}>} breadcrumb - A self-inclusive breadcrumb (root → current)
  * @returns {string}
  */
-const generatePath = (breadcrumb = []) =>
+export const generatePath = (breadcrumb = []) =>
 	`/${breadcrumb.map(({ name }) => name).join("/")}`;
-
-export { generateBreadCrumb, generatePath };

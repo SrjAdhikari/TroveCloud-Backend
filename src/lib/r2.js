@@ -33,7 +33,7 @@ const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET } =
 const R2_CONNECTION_TIMEOUT_MS = 3000;
 const R2_REQUEST_TIMEOUT_MS = 30000;
 
-const r2Client = new S3Client({
+export const r2Client = new S3Client({
 	region: "auto",
 	endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
 	credentials: {
@@ -51,14 +51,14 @@ const r2Client = new S3Client({
 	},
 });
 
-const FILE_PREFIX = "files";
-const PROFILE_PICTURE_PREFIX = "profile-pictures";
+export const FILE_PREFIX = "files";
+export const PROFILE_PICTURE_PREFIX = "profile-pictures";
 
-const UPLOAD_URL_TTL_SECONDS = FIVE_MINUTES_SECONDS;
-const DOWNLOAD_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
-const PROFILE_PICTURE_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
+export const UPLOAD_URL_TTL_SECONDS = FIVE_MINUTES_SECONDS;
+export const DOWNLOAD_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
+export const PROFILE_PICTURE_URL_TTL_SECONDS = ONE_HOUR_SECONDS;
 const SIGNING_WINDOW_MS = FIFTEEN_MINUTES_MS;
-const MAX_DELETE_KEYS_PER_REQUEST = 1000;
+export const MAX_DELETE_KEYS_PER_REQUEST = 1000;
 
 const quantizedSigningDate = (ttlSeconds) => {
 	const window = Math.min(SIGNING_WINDOW_MS, (ttlSeconds * 1000) / 4);
@@ -67,13 +67,13 @@ const quantizedSigningDate = (ttlSeconds) => {
 };
 
 const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/;
-const NONCE_PATTERN = /^[a-f0-9]{32}$/;
+export const NONCE_PATTERN = /^[a-f0-9]{32}$/;
 const SAFE_EXTENSION_PATTERN = /^(\.[a-z0-9]+)?$/;
 
-const FILE_KEY_PATTERN = new RegExp(
+export const FILE_KEY_PATTERN = new RegExp(
 	`^${FILE_PREFIX}/[a-f0-9]{24}-[a-f0-9]{32}(\\.[a-z0-9]+)?$`,
 );
-const PROFILE_PICTURE_KEY_PATTERN = new RegExp(
+export const PROFILE_PICTURE_KEY_PATTERN = new RegExp(
 	`^${PROFILE_PICTURE_PREFIX}/[a-f0-9]{24}-[a-f0-9]{32}$`,
 );
 
@@ -81,7 +81,7 @@ const invalidKey = () =>
 	new AppError("Invalid object key", BAD_REQUEST, INVALID_INPUT);
 
 // Syntax check, never an authorization check: either shape passes here.
-const assertKey = (key) => {
+export const assertKey = (key) => {
 	if (
 		typeof key !== "string" ||
 		!(FILE_KEY_PATTERN.test(key) || PROFILE_PICTURE_KEY_PATTERN.test(key))
@@ -91,7 +91,7 @@ const assertKey = (key) => {
 	return key;
 };
 
-const buildFileKey = (fileId, nonce, extension = "") => {
+export const buildFileKey = (fileId, nonce, extension = "") => {
 	const id = String(fileId);
 
 	if (!OBJECT_ID_PATTERN.test(id)) throw invalidKey();
@@ -108,7 +108,7 @@ const buildFileKey = (fileId, nonce, extension = "") => {
 	return assertKey(`${FILE_PREFIX}/${id}-${nonce}${extension}`);
 };
 
-const buildProfilePictureKey = (userId, token) => {
+export const buildProfilePictureKey = (userId, token) => {
 	const owner = String(userId);
 
 	if (!OBJECT_ID_PATTERN.test(owner)) throw invalidKey();
@@ -120,7 +120,7 @@ const buildProfilePictureKey = (userId, token) => {
 
 // Both fields are mandatory: omitting the length does not error, it drops
 // `content-length` from the signature and mints an unbounded upload URL.
-const presignPut = async (key, { contentType, contentLength, ttl } = {}) => {
+export const presignPut = async (key, { contentType, contentLength, ttl } = {}) => {
 	if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
 		throw new AppError(
 			"Upload content length is required",
@@ -153,7 +153,7 @@ const presignPut = async (key, { contentType, contentLength, ttl } = {}) => {
 };
 
 // A presigned GET can include a content type and disposition, but the caller may omit them. The TTL is longer to allow a user to download a file after leaving the page.
-const presignGet = async (
+export const presignGet = async (
 	key,
 	{ fileName, inline = false, contentType, ttl } = {},
 ) => {
@@ -179,7 +179,7 @@ const isNotFound = (error) =>
 	error?.name === "NotFound" || error?.$metadata?.httpStatusCode === 404;
 
 // Returns null when the key is absent, or an object with size and contentType when present
-const getObjectMetadata = async (key) => {
+export const getObjectMetadata = async (key) => {
 	try {
 		const result = await r2Client.send(
 			new HeadObjectCommand({ Bucket: R2_BUCKET, Key: assertKey(key) }),
@@ -193,7 +193,7 @@ const getObjectMetadata = async (key) => {
 
 // Reads a byte range from an object. Returns null when the key is absent, or an
 // empty buffer when the range is unsatisfiable. Throws on invalid ranges.
-const readRange = async (key, start, end) => {
+export const readRange = async (key, start, end) => {
 	if (
 		!Number.isSafeInteger(start) ||
 		!Number.isSafeInteger(end) ||
@@ -224,7 +224,7 @@ const readRange = async (key, start, end) => {
 };
 
 // Multipart, so it takes streams of unknown length (Drive import) as well as buffers.
-const putObject = async (key, stream, { contentType, cacheControl } = {}) => {
+export const putObject = async (key, stream, { contentType, cacheControl } = {}) => {
 	const upload = new Upload({
 		client: r2Client,
 		queueSize: 1,
@@ -240,13 +240,13 @@ const putObject = async (key, stream, { contentType, cacheControl } = {}) => {
 	await upload.done();
 };
 
-const deleteObject = async (key) => {
+export const deleteObject = async (key) => {
 	await r2Client.send(
 		new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: assertKey(key) }),
 	);
 };
 
-const deleteObjects = async (keys) => {
+export const deleteObjects = async (keys) => {
 	if (!Array.isArray(keys)) {
 		throw new AppError(
 			"Object keys must be an array",
@@ -291,7 +291,7 @@ const deleteObjects = async (keys) => {
 	return { deleted, errors };
 };
 
-const listObjects = async (prefix, continuationToken) => {
+export const listObjects = async (prefix, continuationToken) => {
 	const result = await r2Client.send(
 		new ListObjectsV2Command({
 			Bucket: R2_BUCKET,
@@ -308,28 +308,4 @@ const listObjects = async (prefix, continuationToken) => {
 		})),
 		nextToken: result.NextContinuationToken,
 	};
-};
-
-export {
-	r2Client,
-	FILE_PREFIX,
-	PROFILE_PICTURE_PREFIX,
-	FILE_KEY_PATTERN,
-	PROFILE_PICTURE_KEY_PATTERN,
-	NONCE_PATTERN,
-	assertKey,
-	buildFileKey,
-	buildProfilePictureKey,
-	presignPut,
-	presignGet,
-	getObjectMetadata,
-	readRange,
-	putObject,
-	deleteObject,
-	deleteObjects,
-	listObjects,
-	UPLOAD_URL_TTL_SECONDS,
-	DOWNLOAD_URL_TTL_SECONDS,
-	PROFILE_PICTURE_URL_TTL_SECONDS,
-	MAX_DELETE_KEYS_PER_REQUEST,
 };

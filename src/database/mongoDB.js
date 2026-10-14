@@ -19,7 +19,7 @@ const connectToMongoDB = async () => {
 
 // Graceful shutdown: exit code is 128 plus the stop signal's number (130 for
 // Ctrl+C, 143 for a shutdown request), so a stopped run never looks successful
-const gracefulShutdown = async (signal) => {
+export const gracefulShutdown = async (signal) => {
 	await mongoose.disconnect();
 	console.log("👋️ MongoDB connection closed");
 	process.exit(128 + constants.signals[signal]);
@@ -29,5 +29,4 @@ const gracefulShutdown = async (signal) => {
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
-export { gracefulShutdown };
 export default connectToMongoDB;

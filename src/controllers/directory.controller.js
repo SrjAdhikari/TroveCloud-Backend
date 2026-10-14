@@ -10,7 +10,7 @@ import httpStatus from "../constants/httpStatus.js";
 
 const { OK, CREATED } = httpStatus;
 
-const getDirectoryHandler = async (req, res) => {
+export const getDirectoryHandler = async (req, res) => {
 	const user = req.user;
 
 	// If no ID is explicitly requested, default to the user's permanent Root Directory
@@ -25,7 +25,7 @@ const getDirectoryHandler = async (req, res) => {
 	});
 };
 
-const createDirectoryHandler = async (req, res) => {
+export const createDirectoryHandler = async (req, res) => {
 	const user = req.user;
 
 	// Name is sanitized and defaulted by createDirectorySchema (validateBody).
@@ -43,7 +43,7 @@ const createDirectoryHandler = async (req, res) => {
 	});
 };
 
-const updateDirectoryHandler = async (req, res) => {
+export const updateDirectoryHandler = async (req, res) => {
 	const user = req.user;
 	const directoryId = req.params.id;
 
@@ -63,7 +63,7 @@ const updateDirectoryHandler = async (req, res) => {
 	});
 };
 
-const deleteDirectoryHandler = async (req, res) => {
+export const deleteDirectoryHandler = async (req, res) => {
 	const user = req.user;
 	const directoryId = req.params.id;
 
@@ -74,11 +74,4 @@ const deleteDirectoryHandler = async (req, res) => {
 		message: "Directory deleted successfully",
 		data: deletedDirectory,
 	});
-};
-
-export {
-	getDirectoryHandler,
-	createDirectoryHandler,
-	updateDirectoryHandler,
-	deleteDirectoryHandler,
 };

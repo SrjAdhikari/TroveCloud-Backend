@@ -8,7 +8,7 @@
  * @readonly
  * @enum {string}
  */
-const USER_STATUS = Object.freeze({
+export const USER_STATUS = Object.freeze({
 	ACTIVE: "active",
 	SUSPENDED: "suspended",
 	DELETED: "deleted",
@@ -23,10 +23,8 @@ const USER_STATUS = Object.freeze({
  * @param {{ deletedAt?: Date | null, suspendedAt?: Date | null }} user
  * @returns {"active" | "suspended" | "deleted"}
  */
-const getUserStatus = (user) => {
+export const getUserStatus = (user) => {
 	if (user.deletedAt) return USER_STATUS.DELETED;
 	if (user.suspendedAt) return USER_STATUS.SUSPENDED;
 	return USER_STATUS.ACTIVE;
 };
-
-export { USER_STATUS, getUserStatus };

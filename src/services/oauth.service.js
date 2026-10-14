@@ -32,7 +32,7 @@ const { PROVIDER_MISMATCH, UNAUTHORIZED_ACCESS, ACCOUNT_SUSPENDED } =
  *
  * @throws {AppError} `PROVIDER_MISMATCH` — the email already belongs to an account registered with a different provider.
  */
-const loginOrCreateOAuthUser = async (provider, profile, deviceInfo) => {
+export const loginOrCreateOAuthUser = async (provider, profile, deviceInfo) => {
 	const { name: providerName, email, picture } = profile;
 
 	// Sanitize the display name to prevent XSS and database overflow issues.
@@ -132,5 +132,3 @@ const loginOrCreateOAuthUser = async (provider, profile, deviceInfo) => {
 
 	return { session, isNewUser: true };
 };
-
-export { loginOrCreateOAuthUser };

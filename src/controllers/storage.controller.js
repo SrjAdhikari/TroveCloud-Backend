@@ -5,7 +5,7 @@ import httpStatus from "../constants/httpStatus.js";
 
 const { OK } = httpStatus;
 
-const getStorageUsageHandler = async (req, res) => {
+export const getStorageUsageHandler = async (req, res) => {
 	const userId = req.user._id;
 	const totalStorageLimit = req.user.storageLimit;
 
@@ -17,5 +17,3 @@ const getStorageUsageHandler = async (req, res) => {
 		data: usage,
 	});
 };
-
-export { getStorageUsageHandler };

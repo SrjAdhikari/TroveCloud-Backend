@@ -35,7 +35,7 @@ const normalizeFileName = (file) => {
  * @returns {Promise<Object>} The file document
  * @throws {AppError} If the file does not exist or the user does not own it
  */
-const getFile = async (fileId, userId) => {
+export const getFile = async (fileId, userId) => {
 	const file = await File.findOne({
 		_id: fileId,
 		userId,
@@ -59,7 +59,7 @@ const getFile = async (fileId, userId) => {
  * @returns {Promise<{url: string, expiresAt: Date}>} Signed URL and its expiry
  * @throws {AppError} If the file does not exist or the user does not own it
  */
-const createDownloadUrl = async (fileId, userId, options = {}) => {
+export const createDownloadUrl = async (fileId, userId, options = {}) => {
 	const file = await File.findOne({ _id: fileId, userId, status: "ready" })
 		.select("+objectKey")
 		.lean();
@@ -92,7 +92,7 @@ const createDownloadUrl = async (fileId, userId, options = {}) => {
  * @returns {Promise<Object>} The updated file document
  * @throws {AppError} Missing, still a pending upload, or not owned by the user
  */
-const updateFile = async (fileId, newFileName, userId) => {
+export const updateFile = async (fileId, newFileName, userId) => {
 	const updatedFile = await File.findOneAndUpdate(
 		{ _id: fileId, userId, status: "ready" },
 		{ name: newFileName },
@@ -115,7 +115,7 @@ const updateFile = async (fileId, newFileName, userId) => {
  * @returns {Promise<Object>} The deleted file document
  * @throws {AppError} Missing, still uploading, or not owned by the user
  */
-const deleteFile = async (fileId, userId) => {
+export const deleteFile = async (fileId, userId) => {
 	const file = await File.findOne({ _id: fileId, userId })
 		.select("+objectKey")
 		.lean();
@@ -157,11 +157,4 @@ const deleteFile = async (fileId, userId) => {
 	await removeObject(objectKey, file._id);
 
 	return responseFile;
-};
-
-export {
-	getFile,
-	createDownloadUrl,
-	updateFile,
-	deleteFile,
 };

@@ -35,57 +35,45 @@ const otp = z
 	.trim()
 	.regex(/^\d{6}$/, "OTP must be a 6-digit code");
 
-const registerSchema = z.object({
+export const registerSchema = z.object({
 	name,
 	email,
 	password,
 });
 
-const loginSchema = z.object({
+export const loginSchema = z.object({
 	email,
 	password: z.string().trim().nonempty("Password is required"),
 });
 
-const verifyOtpSchema = z.object({
+export const verifyOtpSchema = z.object({
 	email,
 	otp,
 });
 
-const resendOtpSchema = z.object({
+export const resendOtpSchema = z.object({
 	email,
 });
 
-const forgotPasswordSchema = z.object({
+export const forgotPasswordSchema = z.object({
 	email,
 });
 
-const resetPasswordSchema = z.object({
+export const resetPasswordSchema = z.object({
 	email,
 	otp,
 	newPassword: password,
 });
 
-const changePasswordSchema = z.object({
+export const changePasswordSchema = z.object({
 	currentPassword: z.string().trim().nonempty("Current password is required"),
 	newPassword: password,
 });
 
-const googleOAuthSchema = z.object({
+export const googleOAuthSchema = z.object({
 	idToken: z.string().trim().nonempty("ID token is required"),
 });
 
-const githubOAuthSchema = z.object({
+export const githubOAuthSchema = z.object({
 	code: z.string().trim().nonempty("Authorization code is required"),
 });
-
-export {
-	registerSchema,
-	loginSchema,
-	verifyOtpSchema,
-	resendOtpSchema,
-	forgotPasswordSchema,
-	resetPasswordSchema,
-	changePasswordSchema,
-	googleOAuthSchema,
-	githubOAuthSchema,
-};

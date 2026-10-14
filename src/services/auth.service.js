@@ -64,7 +64,7 @@ const {
  * @param {string} password - The user's unhashed password
  * @throws {AppError} If the user already exists and is fully verified
  */
-const createUser = async (name, email, password) => {
+export const createUser = async (name, email, password) => {
 	const user = await User.findOne({ email });
 
 	if (user && user.isVerified) {
@@ -105,7 +105,7 @@ const createUser = async (name, email, password) => {
  * @returns {Promise<Object>} The verified user document
  * @throws {AppError} If the user is missing, or the OTP is invalid/expired
  */
-const verifyOTP = async (email, otp) => {
+export const verifyOTP = async (email, otp) => {
 	const user = await User.findOne({ email, isVerified: false }).select(
 		"+otp +otpExpiresAt",
 	);
@@ -161,7 +161,7 @@ const verifyOTP = async (email, otp) => {
  * @param {string} email - The unverified user's email address
  * @throws {AppError} If cooldown is active, user is missing, or user is already verified
  */
-const resendOTP = async (email) => {
+export const resendOTP = async (email) => {
 	const user = await User.findOne({ email }).select("+otpExpiresAt");
 
 	if (!user) {
@@ -192,7 +192,7 @@ const resendOTP = async (email) => {
  * @param {string} email - The user's email address
  * @throws {AppError} If the user is missing/unverified, signed in via OAuth, or the cooldown is active
  */
-const forgotPassword = async (email) => {
+export const forgotPassword = async (email) => {
 	const user = await User.findOne({ email, isVerified: true }).select(
 		"+otpExpiresAt",
 	);
@@ -238,7 +238,7 @@ const forgotPassword = async (email) => {
  * @param {string} newPassword - The user's chosen new password
  * @throws {AppError} If the user is missing/unverified, signed in via OAuth, or the OTP is invalid/expired
  */
-const resetPassword = async (email, otp, newPassword) => {
+export const resetPassword = async (email, otp, newPassword) => {
 	const user = await User.findOne({ email, isVerified: true }).select(
 		"+otp +otpExpiresAt",
 	);
@@ -293,7 +293,7 @@ const resetPassword = async (email, otp, newPassword) => {
  * @returns {Promise<void>}
  * @throws {AppError} USER_NOT_FOUND | PROVIDER_MISMATCH | INVALID_CREDENTIALS | PASSWORD_REUSE.
  */
-const changePassword = async (
+export const changePassword = async (
 	userId,
 	currentPassword,
 	newPassword,
@@ -361,7 +361,7 @@ const changePassword = async (
  * @returns {Promise<Object>} The generated session document
  * @throws {AppError} If credentials fail or the user is unverified
  */
-const loginUser = async (email, password, deviceInfo) => {
+export const loginUser = async (email, password, deviceInfo) => {
 	const user = await User.findOne({ email }).select("+password");
 
 	if (!user) {
@@ -435,7 +435,7 @@ const loginUser = async (email, password, deviceInfo) => {
  * @throws {AppError} `INVALID_ID_TOKEN` — the token is invalid or malformed.
  * @throws {AppError} `GOOGLE_EMAIL_NOT_VERIFIED` — Google has not verified the email on the account.
  */
-const loginOrCreateGoogleUser = async (idToken, deviceInfo) => {
+export const loginOrCreateGoogleUser = async (idToken, deviceInfo) => {
 	const payload = await verifyGoogleIdToken(idToken);
 	const { name, email, picture, email_verified: emailVerified } = payload;
 
@@ -462,7 +462,7 @@ const loginOrCreateGoogleUser = async (idToken, deviceInfo) => {
  * @throws {AppError} `INVALID_GITHUB_CODE` — the code is invalid, expired, or the GitHub API call failed.
  * @throws {AppError} `GITHUB_EMAIL_NOT_VERIFIED` — the account has no verified primary email.
  */
-const loginOrCreateGithubUser = async (code, deviceInfo) => {
+export const loginOrCreateGithubUser = async (code, deviceInfo) => {
 	const profile = await verifyGithubCodeAndFetchProfile(code);
 	return loginOrCreateOAuthUser("github", profile, deviceInfo);
 };
@@ -473,7 +473,7 @@ const loginOrCreateGithubUser = async (code, deviceInfo) => {
  * @param {string} sessionId - The specific session to delete
  * @returns {Promise<void>}
  */
-const logoutUser = async (sessionId) => {
+export const logoutUser = async (sessionId) => {
 	if (sessionId) {
 		await Session.deleteOne({ _id: sessionId });
 	}
@@ -485,22 +485,8 @@ const logoutUser = async (sessionId) => {
  * @param {string} userId - The unique identifier of the user
  * @returns {Promise<void>}
  */
-const logoutAllUser = async (userId) => {
+export const logoutAllUser = async (userId) => {
 	if (userId) {
 		await Session.deleteMany({ userId });
 	}
-};
-
-export {
-	createUser,
-	verifyOTP,
-	resendOTP,
-	forgotPassword,
-	resetPassword,
-	changePassword,
-	loginUser,
-	loginOrCreateGoogleUser,
-	loginOrCreateGithubUser,
-	logoutUser,
-	logoutAllUser,
 };
