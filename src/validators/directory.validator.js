@@ -6,16 +6,14 @@ import sanitizeInput from "../utils/sanitizeInput.js";
 const MAX_NAME_LENGTH = 255;
 const DEFAULT_DIR_NAME = "New Folder";
 
-// Strip control characters and path dividers,
-// strip any HTML, then trim and bound length.
+// Removes HTML, line breaks, tabs and slashes, then trims and cuts to the max length.
 const sanitizeDirName = (value) =>
 	sanitizeInput(value)
 		.replace(/[\r\n\t\\/]/g, "")
 		.trim()
 		.slice(0, MAX_NAME_LENGTH);
 
-// Create accepts an optional name: missing or non-string falls back to the
-// default folder name (matches the historically lenient create behavior).
+// The name is optional: a missing, invalid or empty name becomes "New Folder".
 export const createDirectorySchema = z.object({
 	name: z
 		.string()
@@ -23,8 +21,7 @@ export const createDirectorySchema = z.object({
 		.catch(DEFAULT_DIR_NAME),
 });
 
-// Rename requires a real name: missing, non-string, or empty-after-sanitizing
-// is rejected (matches the controller's previous INVALID_INPUT throw).
+// Renaming needs a real name: a missing, invalid or empty name is rejected.
 export const renameDirectorySchema = z.object({
 	newDirName: z
 		.string("Valid directory name is required")

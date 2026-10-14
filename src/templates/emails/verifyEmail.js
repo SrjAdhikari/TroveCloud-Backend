@@ -3,13 +3,7 @@
 import { layoutEmail } from "./_base.js";
 import { codeBox, infoCallout, paragraph } from "./_components.js";
 
-/**
- * Email verification OTP email sent during registration (and re-registration of unverified accounts).
- *
- * @param {string} userName - Recipient's display name
- * @param {string} otp - 6-digit verification code (plain text, not hashed)
- * @returns {string} Complete HTML email body
- */
+// Email with the code to confirm an email address, sent at sign-up and when the user asks for a new code.
 export const VERIFY_EMAIL_TEMPLATE = (userName, otp) =>
 	layoutEmail({
 		preheader: `Your TroveCloud verification code is ${otp}`,

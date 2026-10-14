@@ -22,18 +22,13 @@ const {
 	CANNOT_ACT_ON_PEER,
 } = appErrorCode;
 
-// Convert the constant objects into plain arrays.
 const ALLOWED_ROLES = Object.values(ROLES);
 const ALLOWED_STATUSES = Object.values(USER_STATUS);
 
-// Escape regex metacharacters so user-supplied search terms cannot inject regex syntax.
+// Treats special characters in the search text as plain text, so a search can't break the query.
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/**
- * Build the Mongo filter that implements the admin user-list semantics from RBAC.
- * Status maps to timestamp predicates; `includeDeleted` only matters when no
- * explicit `status` filter is supplied.
- */
+// The "include deleted" option is ignored when a status filter is set.
 const buildListFilter = ({ q, role, status, includeDeleted }) => {
 	const filter = {};
 
@@ -59,23 +54,11 @@ const buildListFilter = ({ q, role, status, includeDeleted }) => {
 	return filter;
 };
 
-/**
- * Converts user to plain object and adds computed status
- *
- * @param {MongooseDocument} user - Mongoose document
- * @returns {object} - Plain user object with status
- */
 const toPlainUser = (user) => ({
 	...user.toObject(),
 	status: getUserStatus(user),
 });
 
-/**
- * Prevents the caller from performing destructive operations on their own account
- *
- * @param {string} callerId - ID of the caller
- * @param {string} targetId - ID of the target
- */
 const assertNotSelf = (callerId, targetId) => {
 	if (String(callerId) === String(targetId)) {
 		throw new AppError(
@@ -86,12 +69,7 @@ const assertNotSelf = (callerId, targetId) => {
 	}
 };
 
-/**
- * Prevents the caller from performing operations on a user of equal or higher rank
- *
- * @param {object} caller - User doing the action (has .role)
- * @param {object} target - User being acted on (has .role)
- */
+// Admins can't act on users with the same or a higher role.
 const assertCanActOn = (caller, target) => {
 	const callerRank = ROLE_RANK[caller.role];
 	const targetRank = ROLE_RANK[target.role];
@@ -110,10 +88,6 @@ const assertCanActOn = (caller, target) => {
 	}
 };
 
-/**
- * Finds the target user by ID or throws 404
- * @param {string} id - ID of the user to find
- */
 const findUserById = async (id) => {
 	const user = await User.findById(id);
 	if (!user) {
@@ -123,17 +97,6 @@ const findUserById = async (id) => {
 	return user;
 };
 
-/**
- * Paginated user list for the admin console.
- *
- * @param {object} options
- * @param {number} options.page - Current page number.
- * @param {number} options.limit - Number of users per page.
- * @param {string} [options.q] - Case-insensitive email/name search.
- * @param {string} [options.role] - Restrict by role.
- * @param {string} [options.status] - One of `active | suspended | deleted`.
- * @param {boolean} [options.includeDeleted] - Include soft-deleted users when no status filter is set.
- */
 export const listUsers = async ({ page, limit, q, role, status, includeDeleted }) => {
 	if (role && !ALLOWED_ROLES.includes(role)) {
 		throw new AppError(
@@ -178,13 +141,7 @@ export const listUsers = async ({ page, limit, q, role, status, includeDeleted }
 	};
 };
 
-/**
- * Detailed admin view of a single user, including derived storage, file,
- * directory, and session metrics. Soft-deleted users are returned so admins
- * can inspect them; the consumer can branch on the `status` field.
- *
- * @param {string} id - User _id (ObjectId string).
- */
+// Deleted users are returned too, so admins can still look at them.
 export const getUserById = async (id) => {
 	const user = await User.findById(id).lean();
 	if (!user) {
@@ -233,15 +190,6 @@ export const getUserById = async (id) => {
 	};
 };
 
-/**
- * Updates the target user's role
- *
- * @param {object} caller - The admin making the request (has _id and role)
- * @param {string} targetId - ID of the user to update
- * @param {"user"|"admin"|"superadmin"} newRole - New role to assign to the user
- *
- * @returns {Promise<object>} - Object containing the updated user
- */
 export const changeUserRole = async (caller, targetId, newRole) => {
 	if (!ALLOWED_ROLES.includes(newRole)) {
 		throw new AppError(
@@ -272,12 +220,6 @@ export const changeUserRole = async (caller, targetId, newRole) => {
 	return toPlainUser(user);
 };
 
-/**
- * Suspends the target user
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to suspend
- */
 export const suspendUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
@@ -314,15 +256,7 @@ export const suspendUser = async (caller, targetId) => {
 	return toPlainUser(user);
 };
 
-/**
- * Lifts a suspension for the target user
- * Sessions are NOT automatically restored — the user must log in again
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to unsuspend
- *
- * @returns {Promise<object>} - Object containing the unsuspended user
- */
+// Old sessions are not brought back; the user has to log in again.
 export const unsuspendUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 	if (user.deletedAt) {
@@ -346,14 +280,6 @@ export const unsuspendUser = async (caller, targetId) => {
 	return toPlainUser(user);
 };
 
-/**
- * Force-revokes every active session for the target
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to force-logout
- *
- * @returns {Promise<object>} - Object containing the number of sessions revoked
- */
 export const forceLogoutUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 
@@ -376,15 +302,7 @@ export const forceLogoutUser = async (caller, targetId) => {
 	return { sessionsRevoked: deletedCount };
 };
 
-/**
- * Soft delete user
- * Files/directories survive until hard-delete or restore
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to soft-delete
- *
- * @returns {Promise<object>} - Object containing the soft-deleted user
- */
+// The user's files and folders are kept until the user is permanently deleted or restored.
 export const softDeleteUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
@@ -412,16 +330,7 @@ export const softDeleteUser = async (caller, targetId) => {
 	return toPlainUser(user);
 };
 
-/**
- * Hard delete user
- * Irreversibly wipes the user and all their data from MongoDB
- * then deletes their objects from R2
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to hard-delete
- *
- * @returns {Promise<object>} - Object containing the number of files and directories deleted
- */
+// Cannot be undone. Removes the user's records first, then their stored files.
 export const hardDeleteUser = async (caller, targetId) => {
 	assertNotSelf(caller._id, targetId);
 
@@ -506,14 +415,6 @@ export const hardDeleteUser = async (caller, targetId) => {
 	return deletionSummary;
 };
 
-/**
- * Restore soft-deleted user
- *
- * @param {object} caller - User object
- * @param {string} targetId - ID of the user to restore
- *
- * @returns {Promise<object>} - Object containing the restored user
- */
 export const restoreUser = async (caller, targetId) => {
 	const user = await findUserById(targetId);
 

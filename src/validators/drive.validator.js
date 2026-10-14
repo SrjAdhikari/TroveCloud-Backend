@@ -6,8 +6,8 @@ const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/;
 const MAX_ACCESS_TOKEN_LENGTH = 4096;
 const MAX_ITEMS_PER_REQUEST = 50;
 
-// Only `id` is consumed downstream (the service refetches each file's metadata
-// from Drive); `mimeType` is required to preserve the existing request contract.
+// Only `id` is used; the file details are fetched again from Drive.
+// `mimeType` is still required so the request format stays the same.
 const driveItemSchema = z.object({
 	id: z.string().trim().nonempty("each item requires a string id"),
 	mimeType: z.string().trim().nonempty("each item requires a string mimeType"),

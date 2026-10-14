@@ -152,7 +152,7 @@ export const presignPut = async (key, { contentType, contentLength, ttl } = {}) 
 	);
 };
 
-// A presigned GET can include a content type and disposition, but the caller may omit them. The TTL is longer to allow a user to download a file after leaving the page.
+// Content type and download name are optional. The link lasts longer so users can still download after leaving the page.
 export const presignGet = async (
 	key,
 	{ fileName, inline = false, contentType, ttl } = {},
@@ -191,8 +191,8 @@ export const getObjectMetadata = async (key) => {
 	}
 };
 
-// Reads a byte range from an object. Returns null when the key is absent, or an
-// empty buffer when the range is unsatisfiable. Throws on invalid ranges.
+// Reads part of a file. Returns null if the file is missing, or empty if the range is past the end.
+// Throws if the range is invalid.
 export const readRange = async (key, start, end) => {
 	if (
 		!Number.isSafeInteger(start) ||

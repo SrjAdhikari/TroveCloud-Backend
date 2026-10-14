@@ -8,18 +8,8 @@ import { ROLES, ROLE_RANK } from "../constants/roles.js";
 const { UNAUTHORIZED, FORBIDDEN } = httpStatus;
 const { UNAUTHORIZED_ACCESS, INSUFFICIENT_ROLE } = appErrorCode;
 
-/**
- * Role-aware authorization middleware.
- *
- * Compares `req.user.role` against `minRole` using `ROLE_RANK`.
- * A caller of equal or higher rank passes; lower rank, missing role, or
- * unrecognised role produces 403 INSUFFICIENT_ROLE (fails closed).
- *
- * `minRole` is validated at registration time so a typo throws at server
- * boot rather than silently allowing every caller through.
- *
- * @param {"user" | "admin" | "superadmin"} minRole
- */
+// Lets in users whose role is at least the minimum; others, or an unknown role, get 403.
+// A wrong minimum role throws when the server starts, so a typo can't let everyone in.
 export const requireRole = (minRole) => {
 	const requiredRank = ROLE_RANK[minRole];
 
@@ -44,7 +34,4 @@ export const requireRole = (minRole) => {
 	};
 };
 
-/**
- * Shorthand for `requireRole('superadmin')`.
- */
 export const requireSuperadmin = () => requireRole(ROLES.SUPERADMIN);

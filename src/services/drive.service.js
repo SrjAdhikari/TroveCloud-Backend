@@ -40,14 +40,10 @@ const FOLDER_MIME = "application/vnd.google-apps.folder";
 const SHORTCUT_MIME = "application/vnd.google-apps.shortcut";
 const GOOGLE_APPS_PREFIX = "application/vnd.google-apps.";
 
-// Conservative caps; tune later if real usage warrants it.
+// Safe limits for now; raise them later if real use needs more.
 const MAX_DEPTH = 20;
 
-/**
- * Strips HTML, pads short names, truncates long names, strips control chars
- * and path separators. `Directory.name` is bounded to [3, 50] in Mongoose —
- * this guarantees that.
- */
+// Folder names must be 3–50 characters, so short names are padded and long ones cut.
 export const sanitizeDirName = (name) => {
 	// sanitizeInput strips HTML and coerces non-strings to "".
 	let clean = sanitizeInput(name).replace(/[\r\n\t\\/]/g, "").trim();
@@ -59,12 +55,8 @@ export const sanitizeDirName = (name) => {
 	return clean;
 };
 
-/**
- * Strips HTML, then produces a filename that satisfies `File.name` (minlength 3,
- * no hard max in schema but we cap at 255 to mirror the manual-upload controller).
- * When `fallbackExt` is supplied (Google-native export), ensures the name carries
- * that extension — `uploadFileFromServer` rejects a name without one.
- */
+// Capped at 255 characters to match manual uploads. Exported Google files get
+// their extension added, because the upload rejects a name without one.
 export const sanitizeFileName = (name, fallbackExt = "") => {
 	// sanitizeInput strips HTML and coerces non-strings to "".
 	let clean = path
@@ -83,10 +75,8 @@ export const sanitizeFileName = (name, fallbackExt = "") => {
 	return clean;
 };
 
-/**
- * Drains a Drive folder's children across all pages. Shortcuts are returned
- * inline; the per-item handler decides to reject them.
- */
+// Gets every item in a Drive folder, going through all pages of results.
+// Drive shortcuts are included; they are rejected later, when each item is imported.
 const listAllChildren = async (accessToken, folderId) => {
 	const children = [];
 	let pageToken;
@@ -105,10 +95,8 @@ const listAllChildren = async (accessToken, folderId) => {
 	return children;
 };
 
-/**
- * Advisory quota pre-flight for a file with a declared size, so an over-quota
- * file is rejected before its download. The in-upload check stays authoritative.
- */
+// Early check so an over-quota file is rejected before it downloads.
+// The check during the upload is still the one that counts.
 const assertDeclaredSizeFits = async (ctx, declaredSize) => {
 	const fits = async () =>
 		(await getStoredBytes(ctx.userId)) + declaredSize <= ctx.storageLimit;
@@ -130,12 +118,8 @@ const assertDeclaredSizeFits = async (ctx, declaredSize) => {
 	);
 };
 
-/**
- * Streams a Drive file (regular download or Google-native export) into the
- * user's tree via the `uploadFileFromServer` service. Tracks bytes so the
- * aggregate cap can be enforced, and short-circuits early on the size caps and
- * the quota when the size is known up front (regular files with a `size` in metadata).
- */
+// Counts the bytes as they arrive, to enforce the total import limit. Files with a known
+// size are checked against the limits and quota before downloading.
 const streamFileIntoTrove = async (
 	ctx,
 	targetParentDirId,
@@ -220,12 +204,7 @@ const streamFileIntoTrove = async (
 	}
 };
 
-/**
- * Imports a single Drive item into the given parent directory, recursing into
- * folders. Emits results into `ctx.imported` / `ctx.failed`. Never throws to
- * the top level — every error is mapped to a `failed` entry so one bad item
- * doesn't abort the whole batch.
- */
+// Never throws: each error is added to the failed list, so one bad item doesn't stop the import.
 const importItem = async (
 	ctx,
 	driveId,
@@ -372,19 +351,8 @@ const importItem = async (
 	}
 };
 
-/**
- * Orchestrates a one-shot import of picked Drive items into the authenticated
- * user's tree. Returns a partial-success report; HTTP status is always 200
- * unless the controller-layer input validation fails — per-item errors,
- * including an unusable `storageLimit`, land in `failed[]`.
- *
- * @param {string} userId
- * @param {string} accessToken - Short-lived Drive token (scope: drive.readonly).
- * @param {Array<{id:string, mimeType:string, name?:string}>} items
- * @param {string} parentDirId - Resolved target directory (controller defaults to user.rootDirId).
- * @param {number} storageLimit - The user's quota in bytes, enforced per imported file.
- * @returns {Promise<{imported:Array, failed:Array}>}
- */
+// Imports the files and folders the user picked from Google Drive.
+// If one item fails, the rest still import; the result lists what worked and what failed.
 export const importFromDrive = async (
 	userId,
 	accessToken,

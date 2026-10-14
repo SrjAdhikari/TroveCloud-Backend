@@ -1,9 +1,6 @@
 //* src/errors/AppError.js
 
-/**
- * Custom error class for handling application errors
- * @extends Error
- */
+// Custom error class for handling application errors
 class AppError extends Error {
 	constructor(message, statusCode = 500, code = "INTERNAL_ERROR") {
 		super(message);

@@ -2,14 +2,8 @@
 
 import { Transform } from "node:stream";
 
-/**
- * Counts bytes passing through a stream and aborts the pipeline
- * when either the per-file cap or the remaining aggregate budget is exceeded.
- *
- * @param {number} perFileCap - Max bytes permitted for this single file.
- * @param {number} [remainingBudget=Infinity] - Optional aggregate-request budget.
- * @returns {{ stream: Transform, state: { bytes: number, tripped: boolean } }} - The stream and the state.
- */
+// Counts bytes passing through a stream and errors out once the file limit or the remaining total limit is passed.
+// `state.tripped` becomes true when that happens.
 const createByteCounter = (perFileCap, remainingBudget = Infinity) => {
 	const state = { bytes: 0, tripped: false };
 

@@ -3,12 +3,6 @@
 // Minimum bytes needed to decide every supported type.
 export const MIN_HEADER_BYTES = 16;
 
-/**
- * Detects a supported raster image type from a buffer's leading bytes.
- *
- * @param {Buffer} buf - Bytes from the start of the file/stream.
- * @returns {{ mime: string, ext: string } | null} The type, or null if unsupported.
- */
 export const detectImageType = (buf) => {
 	if (
 		buf.length >= 3 &&
@@ -98,12 +92,6 @@ const INLINE_SAFE_TYPES = Object.freeze(
 	]),
 );
 
-/**
- * Resolves a stored Content-Type from a file extension.
- *
- * @param {string} [extension] - Extension with or without the leading dot.
- * @returns {string} The mapped type, or `application/octet-stream`.
- */
 export const mimeFromExtension = (extension) => {
 	if (typeof extension !== "string") return DEFAULT_MIME;
 	const mime = EXTENSION_MIME_MAP[extension.replace(/^\./, "").toLowerCase()];
@@ -111,5 +99,4 @@ export const mimeFromExtension = (extension) => {
 	return typeof mime === "string" ? mime : DEFAULT_MIME;
 };
 
-/** Whether this type may be served with `inline` disposition. */
 export const isInlineSafe = (contentType) => INLINE_SAFE_TYPES.has(contentType);

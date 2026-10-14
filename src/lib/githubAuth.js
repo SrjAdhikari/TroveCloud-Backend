@@ -14,18 +14,8 @@ const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, NODE_ENV } = envConfig;
 const GITHUB_FETCH_TIMEOUT_MS = 8000;
 const GITHUB_USER_AGENT = "TroveCloud";
 
-/**
- * Verifies a GitHub OAuth code and returns the user's profile.
- *
- * Runs the full server-side OAuth exchange: trades the code for an access token,
- * then fetches the user's profile and verified primary email from GitHub.
- *
- * @param {string} code - Single-use authorization code from the GitHub OAuth callback.
- * @returns {Promise<{ name: string, email: string, picture: string }>} Normalized profile for the service layer.
- *
- * @throws {AppError} `INVALID_GITHUB_CODE` — code exchange failed, a GitHub API call returned non-2xx, or the response was malformed.
- * @throws {AppError} `GITHUB_EMAIL_NOT_VERIFIED` — the account has no primary verified email.
- */
+// Swaps the one-time GitHub login code for the user's name, email and picture.
+// Fails if the account has no verified main email.
 const verifyGithubCodeAndFetchProfile = async (code) => {
 	try {
 		// 1. Exchange the authorization code for an access token

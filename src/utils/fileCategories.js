@@ -1,10 +1,7 @@
 //* src/utils/fileCategories.js
 
-/**
- * Maps a file extension to a coarse storage category and exposes the Lucide
- * icon each category renders with on the frontend. Used by the storage-usage
- * breakdown. Extensions are matched lowercase, with or without a leading dot.
- */
+// Groups file extensions into storage categories, with the icon the frontend shows
+// for each. Used for the storage breakdown.
 
 export const CATEGORY_ICONS = Object.freeze({
 	Documents: "file-text",
@@ -70,13 +67,6 @@ const EXTENSION_CATEGORY = Object.freeze({
 	xz: "Archives",
 });
 
-/**
- * Resolves a file extension to its storage category.
- *
- * @param {string} [extension] - Extension as stored on the file (e.g. ".jpg"),
- *   case-insensitive; a missing leading dot or empty/undefined value is tolerated.
- * @returns {string} One of the keys in `CATEGORY_ICONS`; "Other" when unknown.
- */
 export const categorizeExtension = (extension) => {
 	const normalized = (extension ?? "").replace(/^\./, "").toLowerCase();
 	return EXTENSION_CATEGORY[normalized] ?? "Other";

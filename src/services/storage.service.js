@@ -9,18 +9,7 @@ import {
 	CATEGORY_ICONS,
 } from "../utils/fileCategories.js";
 
-/**
- * Returns the authenticated user's storage usage: total quota,
- * bytes used, and a per-category breakdown.
- *
- * `usedBytes` is read from the denormalized root-directory size
- * so the storage bar never disagrees with the quota check. Expired
- * reservations are swept first so lapsed and cancelled uploads settle.
- *
- * @param {string} userId - The authenticated user's id.
- * @param {number} totalStorageLimit - The user's total storage limit in bytes.
- * @returns {Promise<{used: number, total: number, breakdown: Array<{category: string, size: number, icon: string}>}>}
- */
+// Reads usage from the root folder's total so it always matches the quota check.
 export const getStorageUsage = async (userId, totalStorageLimit) => {
 	await settleExpiredPendingFiles(userId);
 

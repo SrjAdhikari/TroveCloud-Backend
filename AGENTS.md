@@ -50,6 +50,6 @@
 ## Project Conventions
 
 - Prefer a default export when a module exposes one clear primary function, value, type, or interface.
-- Prefer named exports when a module exposes multiple public functions, values, constants, types, or interfaces.
+- Prefer inline named exports when a module exposes multiple public functions, values, constants, types, or interfaces; do not collect them in a trailing `export { ... }` block.
 - Preserve the existing `//* relative/path.ts[x]` file-path header convention when adding or moving source files.
 - Run relevant tests, typecheck, and/or build checks before claiming a change is complete.

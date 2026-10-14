@@ -20,16 +20,8 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
-/**
- * Helper function to clamp a number into the range [min, max].
- * Express delivers req.query as strings, or undefined when the key is absent.
- * This can lead to unexpected behavior if not handled properly.
- *
- * @param {string} raw - Raw string value to parse.
- * @param {number} fallback - Fallback value if parsing fails or value is less than min.
- * @param {object} range - Object with min and max values.
- * @returns {number} - Clamped integer value.
- */
+// Turns a query value (always a string, or missing) into a whole number in range.
+// Bad or too-small values give the fallback; too-large values are capped at max.
 const clampInt = (raw, fallback, { min, max }) => {
 	const parsed = Number.parseInt(raw, 10);
 	if (Number.isNaN(parsed) || parsed < min) return fallback;

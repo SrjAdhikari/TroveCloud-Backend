@@ -17,20 +17,9 @@ const {
 	UPLOAD_IN_PROGRESS,
 } = appErrorCode;
 
-// User-facing label for the root directory, which is stored as `root-<email>`.
+// Name shown to users for their top folder, which is saved as `root-<email>`.
 const ROOT_DISPLAY_NAME = "My Files";
 
-/**
- * Retrieves a directory with its immediate files and child folders, recursive
- * `fileCount`, `folderCount` + `totalSize` for the directory itself and each
- * child folder, a self-inclusive breadcrumb (root → current), and a display
- * path string.
- *
- * @param {string} directoryId - The ID of the directory to fetch
- * @param {string} userId - The ID of the authenticated user to verify ownership
- * @returns {Promise<Object>} Directory metadata, breadcrumb, path, files, and child directories with stats
- * @throws {AppError} If the directory does not exist or the user does not own it
- */
 export const getDirectory = async (directoryId, userId) => {
 	const directory = await Directory.findOne({
 		_id: directoryId,
@@ -79,15 +68,6 @@ export const getDirectory = async (directoryId, userId) => {
 	};
 };
 
-/**
- * Creates a new directory inside a specified parent directory.
- *
- * @param {string} parentDirId - The ID of the parent directory
- * @param {string} dirname - The name of the new directory
- * @param {string} userId - The ID of the authenticated user to verify ownership
- * @returns {Promise<Object>} The newly created directory document
- * @throws {AppError} If the parent directory does not exist or the user does not own it
- */
 export const createDirectory = async (parentDirId, dirname, userId) => {
 	const parentDir = await Directory.findOne({
 		_id: parentDirId,
@@ -134,15 +114,6 @@ export const createDirectory = async (parentDirId, dirname, userId) => {
 	return directoryView;
 };
 
-/**
- * Renames a directory owned by the authenticated user.
- *
- * @param {string} directoryId - The ID of the directory to rename
- * @param {string} newDirName - The new name for the directory
- * @param {string} userId - The ID of the authenticated user to verify ownership
- * @returns {Promise<Object>} The updated directory document
- * @throws {AppError} If the directory does not exist or the user does not own it
- */
 export const updateDirectory = async (directoryId, newDirName, userId) => {
 	const directory = await Directory.findOne({
 		_id: directoryId,
@@ -171,14 +142,6 @@ export const updateDirectory = async (directoryId, newDirName, userId) => {
 	return updatedDirectory;
 };
 
-/**
- * Deletes a directory and all of its contents (files and child directories).
- *
- * @param {string} directoryId - The ID of the directory to delete
- * @param {string} userId - The ID of the authenticated user to verify ownership
- * @returns {Promise<Object>} The deleted directory document
- * @throws {AppError} If the directory does not exist or the user does not own it
- */
 export const deleteDirectory = async (directoryId, userId) => {
 	// Step 1: Find the directory to delete
 	const rootDir = await Directory.findOne({ _id: directoryId, userId }).lean();
@@ -295,16 +258,8 @@ export const deleteDirectory = async (directoryId, userId) => {
 	return rootDir;
 };
 
-/**
- * Walks parentDirId from startDirId up to the root and applies a
- * size/fileCount/folderCount delta to that directory and every ancestor,
- * atomically via $inc. Pass the active transaction `session` so the walk +
- * update join the caller's transaction.
- *
- * @param {import("mongoose").Types.ObjectId|string} startDirId
- * @param {{ bytes?: number, files?: number, folders?: number }} delta
- * @param {import("mongoose").ClientSession} [session]
- */
+// Updates the counts on this folder and every folder above it.
+// Pass in the caller's database session so this change succeeds or fails together with theirs.
 export const updateAncestorDirectoryStats = async (
 	startDirId,
 	{ bytes = 0, files = 0, folders = 0 },
@@ -332,14 +287,8 @@ export const updateAncestorDirectoryStats = async (
 	);
 };
 
-/**
- * Resolves an ordered list of directory IDs into [{ _id, name }], preserving
- * the input order. Ownership-scoped. Returns [] for an empty chain.
- *
- * @param {Array<import("mongoose").Types.ObjectId|string>} dirIds
- * @param {string} userId
- * @returns {Promise<Array<{_id: import("mongoose").Types.ObjectId|string, name: string}>>}
- */
+// Turns a list of folder IDs into { _id, name } pairs, in the same order.
+// Only the user's own folders get a name; any other ID comes back without one.
 export const resolveDirectoryNames = async (dirIds, userId) => {
 	if (!dirIds?.length) return [];
 

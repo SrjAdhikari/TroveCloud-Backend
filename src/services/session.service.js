@@ -5,16 +5,8 @@ import envConfig from "../constants/env.js";
 
 const { MAX_ALLOWED_DEVICES } = envConfig;
 
-/**
- * Caps the number of concurrent sessions a user can have.
- *
- * If the user is already at or over `MAX_ALLOWED_DEVICES`, the oldest session
- * is evicted to make room for a new one. Call this immediately before
- * `Session.create()` in any sign-in flow.
- *
- * @param {import("mongoose").Types.ObjectId | string} userId - User whose sessions should be capped.
- * @returns {Promise<void>}
- */
+// If the user is already signed in on the maximum number of devices, signs out the oldest one.
+// Call this right before creating a new login session.
 export const enforceDeviceLimit = async (userId) => {
 	const activeSessionCount = await Session.countDocuments({ userId });
 

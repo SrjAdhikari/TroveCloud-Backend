@@ -22,13 +22,8 @@ const toExtendedValue = (name) =>
 		(char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
 	);
 
-/**
- * Builds a Content-Disposition header that survives non-ASCII filenames.
- *
- * @param {"inline"|"attachment"} type - The disposition type.
- * @param {string} [fileName] - Omit for a bare disposition with no filename.
- * @returns {string} The Content-Disposition header value.
- */
+// Builds the download header so filenames with non-English characters still work.
+// With no filename, it returns just the type.
 const buildContentDisposition = (type, fileName) => {
 	if (fileName === undefined) return type;
 

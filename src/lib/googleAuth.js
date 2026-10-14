@@ -14,11 +14,6 @@ const { INVALID_ID_TOKEN } = appErrorCode;
 const { GOOGLE_CLIENT_ID, NODE_ENV } = envConfig;
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-/**
- * Verifies a Google ID token and returns the payload.
- * @param {string} idToken - The ID token to verify.
- * @returns {Promise<Object>} The payload of the ID token.
- */
 const verifyGoogleIdToken = async (idToken) => {
 	try {
 		const ticket = await client.verifyIdToken({

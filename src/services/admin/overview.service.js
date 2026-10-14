@@ -8,12 +8,8 @@ import Session from "../../models/session.model.js";
 import { ROLES } from "../../constants/roles.js";
 import { SEVEN_DAYS_MS, THIRTY_DAYS_MS } from "../../utils/date.js";
 
-/**
- * System-wide point-in-time aggregates for the admin dashboard.
- *
- * User counts are computed from `suspendedAt` / `deletedAt` timestamps so the
- * derived-status invariant holds — there is no stored `status` field.
- */
+// Totals for the admin dashboard: users, storage, folders, sign-ups and active sessions.
+// A user's status (active, suspended, deleted) is worked out from dates, since it isn't saved.
 export const getSystemOverview = async () => {
 	const now = new Date();
 	const sevenDaysAgo = new Date(now.getTime() - SEVEN_DAYS_MS);

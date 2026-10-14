@@ -13,12 +13,7 @@ const collections = [
 	{ name: "users", schema: userSchema },
 ];
 
-/**
- * Validate all MongoDB collections against their respective schemas.
- * Creates non-existent collections and adds validation rules to existing ones.
- *
- * @returns {Promise<void>} Resolves when all collections are validated.
- */
+// Creates any missing collections and adds the database validation rules to each one.
 const validateSchema = async () => {
 	try {
 		await connectToMongoDB();

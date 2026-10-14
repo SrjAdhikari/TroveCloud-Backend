@@ -11,13 +11,7 @@ const isValidKey = (key) =>
 	typeof key === "string" &&
 	(FILE_KEY_PATTERN.test(key) || PROFILE_PICTURE_KEY_PATTERN.test(key));
 
-/**
- * Removes objects from the storage based on the provided items.
- * Each item should have a 'key' and a 'label'.
- * Invalid keys will be skipped, and any errors during deletion will be logged.
- *
- * @param {{ key: string, label: string }[]} items
- */
+// Never throws: invalid file keys are skipped and failed deletes are only logged.
 export const removeObjects = async (items) => {
 	const labelByKey = new Map();
 
